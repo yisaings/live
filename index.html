@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>一起看直播</title>
-  <script src="https://cdn.bootcdn.net/ajax/libs/hls.js/1.5.13/hls.min.js"></script>
-  <script src="https://cdn.bootcdn.net/ajax/libs/flv.js/1.6.2/flv.min.js"></script>
+  <script src="./hls.min.js"></script>
+  <script src="./flv.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { display: flex; flex-direction: column; height: 100vh; background: #000; color: #eee; font-family: sans-serif; overflow: hidden; }
@@ -86,6 +86,7 @@
       stopPlayers();
       var video = document.getElementById('player');
       if (/\.m3u8(\?|#|$)/i.test(url)) {
+        // Safari 原生支持 HLS
         if (video.canPlayType('application/vnd.apple.mpegurl')) {
           video.src = url;
           video.play().catch(function () {});
@@ -107,6 +108,7 @@
           setStat('当前浏览器不支持 HLS，请换 Chrome / Edge / Firefox / Safari');
         }
       } else {
+        // flv 备选
         if (window.flvjs && flvjs.isSupported()) {
           flvPlayer = flvjs.createPlayer({ type: 'flv', isLive: true, url: url });
           flvPlayer.attachMediaElement(video);
