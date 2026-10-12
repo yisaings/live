@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>一起看直播</title>
+  <script src="https://cdn.bootcdn.net/ajax/libs/hls.js/1.5.13/hls.min.js"></script>
   <script src="https://cdn.bootcdn.net/ajax/libs/flv.js/1.6.2/flv.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -15,8 +16,9 @@
     #topbar button { padding: 7px 18px; border-radius: 6px; border: none; background: #1e88e5; color: #fff; font-size: 14px; cursor: pointer; white-space: nowrap; }
     #topbar button:hover { background: #1976d2; }
     #main { flex: 1; display: flex; min-height: 0; }
-    #player-box { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
+    #player-box { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; }
     video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    #vstat { font-size: 12px; color: #e53935; padding: 4px 0; min-height: 20px; }
     #chat-box { width: 360px; height: 100%; border-left: 1px solid #333; }
     #chat-box iframe { width: 100%; height: 100%; border: none; background: #fff; }
     #hint { padding: 6px 12px; font-size: 11px; color: #777; background: #141414; }
@@ -30,41 +32,74 @@
 </head>
 <body>
   <div id="topbar">
-    <input id="streamUrl" type="text" value="https://play.marscrm.cn/live_10061762/1600046319_10061762_mix_all.flv" placeholder="直播 FLV 链接">
+    <input id="streamUrl" type="text" value="https://play.marscrm.cn/live_10061762/1600046319_10061762_mix_all.m3u8" placeholder="直播链接（m3u8 推荐，flv 也行）">
     <input id="roomName" type="text" value="" placeholder="聊天房间名，如 yisa-888">
     <button id="go">开始</button>
   </div>
   <div id="main">
     <div id="player-box">
       <video id="player" controls playsinline></video>
+      <div id="vstat"></div>
     </div>
     <div id="chat-box">
       <iframe id="chat" title="聊天室" src="about:blank"></iframe>
     </div>
   </div>
-  <div id="hint">房间名两人填同一个，越复杂越好。首次播放需点一下画面取消静音。换直播时只改链接即可。</div>
+  <div id="hint">房间名两人填同一个，越复杂越好。换直播时只改链接即可（m3u8 结尾的优先）。</div>
 
   <script>
-    var player = null;
+    var hls = null, flvPlayer = null;
+    var vstat = document.getElementById('vstat');
+    function setStat(t) { vstat.textContent = t || ''; }
+    function stopPlayers() {
+      if (hls) { try { hls.destroy(); } catch (e) {} hls = null; }
+      if (flvPlayer) { try { flvPlayer.unload(); flvPlayer.detachMediaElement(); flvPlayer.destroy(); } catch (e) {} flvPlayer = null; }
+      var video = document.getElementById('player');
+      try { video.pause(); } catch (e) {}
+      video.removeAttribute('src');
+      video.load();
+    }
     document.getElementById('go').onclick = function () {
       var url = document.getElementById('streamUrl').value.trim();
       var room = document.getElementById('roomName').value.trim();
       if (!url) { alert('先填直播链接'); return; }
       if (!room) { alert('先填聊天房间名，两人填同一个'); return; }
+      setStat('');
 
-      // 聊天室
       document.getElementById('chat').src = 'https://tlk.io/' + encodeURIComponent(room);
 
-      // 播放器
+      stopPlayers();
       var video = document.getElementById('player');
-      if (player) { try { player.unload(); player.detachMediaElement(); player.destroy(); } catch (e) {} player = null; }
-      if (flvjs.isSupported()) {
-        player = flvjs.createPlayer({ type: 'flv', isLive: true, url: url });
-        player.attachMediaElement(video);
-        player.load();
-        player.play().catch(function () {});
+      if (/\.m3u8(\?|#|$)/i.test(url)) {
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = url;
+          video.play().catch(function () {});
+        } else if (window.Hls && Hls.isSupported()) {
+          hls = new Hls({ maxBufferLength: 30, liveSyncDurationCount: 3 });
+          hls.loadSource(url);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, function () {
+            video.play().catch(function () {});
+          });
+          hls.on(Hls.Events.ERROR, function (ev, data) {
+            if (data.fatal) {
+              setStat('播放出错：' + (data.type || '') + '，检查链接是否有效，点"开始"重试');
+              try { hls.destroy(); } catch (e) {}
+              hls = null;
+            }
+          });
+        } else {
+          setStat('当前浏览器不支持 HLS，请换 Chrome / Edge / Firefox / Safari');
+        }
       } else {
-        alert('当前浏览器不支持，请换 Chrome / Edge');
+        if (window.flvjs && flvjs.isSupported()) {
+          flvPlayer = flvjs.createPlayer({ type: 'flv', isLive: true, url: url });
+          flvPlayer.attachMediaElement(video);
+          flvPlayer.load();
+          flvPlayer.play().catch(function () {});
+        } else {
+          setStat('当前浏览器不支持 FLV，请换 Chrome / Edge');
+        }
       }
     };
   </script>
