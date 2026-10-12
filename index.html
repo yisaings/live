@@ -46,8 +46,23 @@
     </div>
   </div>
   <div id="hint">房间名两人填同一个，越复杂越好。换直播时只改链接即可（m3u8 结尾的优先）。</div>
+  <div id="diag" style="padding:6px 12px;font-size:11px;color:#4caf50;background:#141414;word-break:break-all;"></div>
 
   <script>
+    // 开机自检：把浏览器的解码能力直接显示出来
+    (function diagnose() {
+      var parts = [];
+      parts.push('Firefox版本=' + (navigator.userAgent.match(/Firefox\/(\d+)/) || [,'未知'])[1]);
+      parts.push('MediaSource=' + (typeof window.MediaSource === 'function' ? '有' : '无'));
+      try {
+        parts.push('H264硬解=' + (window.MediaSource.isTypeSupported('video/mp4;codecs="avc1.42E01E,mp4a.40.2"') ? '支持' : '不支持'));
+      } catch (e) { parts.push('H264硬解=检测失败'); }
+      parts.push('Hls库=' + (typeof window.Hls === 'function' ? '已加载' : '未加载'));
+      parts.push('flvjs=' + (window.flvjs && flvjs.isSupported() ? '支持' : '不支持'));
+      var el = document.getElementById('diag');
+      if (el) el.textContent = '浏览器检测：' + parts.join('，');
+    })();
+
     var hls = null, flvPlayer = null;
     var vstat = document.getElementById('vstat');
     function setStat(t) { vstat.textContent = t || ''; }
