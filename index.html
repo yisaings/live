@@ -1,124 +1,240 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>一起看直播</title>
-  <script src="./hls.min.js"></script>
-  <script src="./flv.min.js"></script>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { display: flex; flex-direction: column; height: 100vh; background: #000; color: #eee; font-family: sans-serif; overflow: hidden; }
-    #topbar { display: flex; gap: 8px; padding: 10px 12px; background: #141414; align-items: center; }
-    #topbar input { padding: 7px 10px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 13px; }
-    #streamUrl { flex: 3; min-width: 0; }
-    #roomName { flex: 1; min-width: 120px; }
-    #topbar button { padding: 7px 18px; border-radius: 6px; border: none; background: #1e88e5; color: #fff; font-size: 14px; cursor: pointer; white-space: nowrap; }
-    #topbar button:hover { background: #1976d2; }
-    #main { flex: 1; display: flex; min-height: 0; }
-    #player-box { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; }
-    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
-    #vstat { font-size: 12px; color: #e53935; padding: 4px 0; min-height: 20px; }
-    #chat-box { width: 360px; height: 100%; border-left: 1px solid #333; }
-    #chat-box iframe { width: 100%; height: 100%; border: none; background: #fff; }
-    #hint { padding: 6px 12px; font-size: 11px; color: #777; background: #141414; }
-    @media (max-width: 760px) {
-      #main { flex-direction: column; }
-      #player-box { height: 45%; }
-      #chat-box { width: 100%; height: 55%; border-left: none; border-top: 1px solid #333; }
-      #topbar { flex-wrap: wrap; }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一起看直播</title>
+<script src="./hls.min.js"></script>
+<script src="./flv.min.js"></script>
+<script src="./mqtt.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #111; color: #eee; font-family: sans-serif; }
+  #main { display: flex; gap: 14px; padding: 14px; max-width: 1200px; margin: 0 auto; min-height: 100vh; }
+  #left { flex: 3; min-width: 0; }
+  #right { flex: 1.2; min-width: 260px; display: flex; flex-direction: column; background: #1a1a1a; border-radius: 10px; padding: 12px; max-height: calc(100vh - 28px); }
+  h2 { margin: 4px 0 10px; font-size: 16px; font-weight: normal; color: #aaa; }
+  #bar { display: flex; gap: 8px; margin-bottom: 6px; }
+  #url { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 12px; min-width: 0; }
+  button { padding: 8px 16px; border-radius: 6px; border: none; background: #1e88e5; color: #fff; font-size: 14px; cursor: pointer; white-space: nowrap; }
+  button:hover { background: #1976d2; }
+  video { width: 100%; background: #000; border-radius: 8px; aspect-ratio: 16/9; }
+  #vstat { font-size: 12px; color: #e53935; min-height: 18px; padding: 2px 0; }
+  #diag { font-size: 11px; color: #4caf50; word-break: break-all; margin-bottom: 6px; }
+  #join { display: flex; gap: 6px; margin-bottom: 8px; }
+  #join input { padding: 7px 9px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 13px; min-width: 0; }
+  #room { flex: 1.2; } #nick { flex: 1; }
+  #status { font-size: 12px; color: #888; margin-bottom: 8px; }
+  #status.ok { color: #7CFC00; }
+  #msgs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; min-height: 120px; }
+  .msg { max-width: 88%; padding: 7px 10px; border-radius: 10px; font-size: 14px; line-height: 1.5; word-break: break-all; }
+  .msg .who { font-size: 11px; color: #999; margin-bottom: 2px; }
+  .msg.me { align-self: flex-end; background: #1e88e5; }
+  .msg.me .who { color: #cfe6ff; }
+  .msg.other { align-self: flex-start; background: #2c2c2c; }
+  .msg.sys { align-self: center; background: none; color: #777; font-size: 12px; padding: 2px 6px; }
+  .msg .time { font-size: 10px; color: rgba(255,255,255,.45); margin-left: 6px; }
+  .msg.other .time { color: #888; }
+  #send { display: flex; gap: 6px; margin-top: 8px; }
+  #text { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 14px; min-width: 0; }
+  #tip { font-size: 11px; color: #666; margin-top: 8px; line-height: 1.6; }
+  @media (max-width: 760px) { #main { flex-direction: column; } #right { max-height: 60vh; } }
+</style>
 </head>
 <body>
-  <div id="topbar">
-    <input id="streamUrl" type="text" value="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" placeholder="直播链接（m3u8 推荐，flv 也行）">
-    <input id="roomName" type="text" value="" placeholder="聊天房间名，如 yisa-888">
-    <button id="go">开始</button>
-  </div>
-  <div id="main">
-    <div id="player-box">
-      <video id="player" controls playsinline></video>
-      <div id="vstat"></div>
+<div id="main">
+  <div id="left">
+    <h2>📺 直播</h2>
+    <div id="bar">
+      <input id="url" type="text" value="https://play.marscrm.cn/live_10061762/1600046319_10061762_mix_all.m3u8" placeholder="直播链接（m3u8 推荐，flv 也行）">
+      <button id="play">播放</button>
     </div>
-    <div id="chat-box">
-      <iframe id="chat" title="聊天室" src="about:blank"></iframe>
-    </div>
+    <video id="v" controls playsinline></video>
+    <div id="vstat"></div>
+    <div id="diag"></div>
+    <div id="tip">换直播时只改链接即可（m3u8 结尾的优先）。黑屏无画面=流已失效，重新抓链接。</div>
   </div>
-  <div id="hint">房间名两人填同一个，越复杂越好。换直播时只改链接即可（m3u8 结尾的优先）。</div>
-  <div id="diag" style="padding:6px 12px;font-size:11px;color:#4caf50;background:#141414;word-break:break-all;"></div>
+  <div id="right">
+    <h2>💬 聊天</h2>
+    <div id="join">
+      <input id="room" placeholder="房间号">
+      <input id="nick" placeholder="昵称">
+      <button id="joinBtn">进入</button>
+    </div>
+    <details id="adv" style="margin-bottom:8px;">
+      <summary style="font-size:12px;color:#888;cursor:pointer;">聊天服务器设置</summary>
+      <input id="broker" type="text" value="wss://broker.emqx.io:8084/mqtt"
+             style="width:100%;margin-top:6px;padding:7px 9px;border-radius:6px;border:1px solid #444;background:#222;color:#eee;font-size:12px;">
+      <div style="font-size:11px;color:#666;margin-top:4px;">对方连不上公共服务器时，改成自建的 ws://你的服务器IP:8083/mqtt（本页须用 http 打开，不能是 https）</div>
+    </details>
+    <div id="status">未连接</div>
+    <div id="msgs"></div>
+    <div id="send">
+      <input id="text" placeholder="说点什么…" maxlength="500">
+      <button id="sendBtn">发送</button>
+    </div>
+    <div id="tip">两人填同一个房间号（复杂一点）。聊天经 MQTT 服务器中转，别聊敏感信息。</div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
 
-  <script>
-    // 开机自检：把浏览器的解码能力直接显示出来
-    (function diagnose() {
-      var parts = [];
-      parts.push('Firefox版本=' + (navigator.userAgent.match(/Firefox\/(\d+)/) || [,'未知'])[1]);
-      parts.push('MediaSource=' + (typeof window.MediaSource === 'function' ? '有' : '无'));
-      try {
-        parts.push('H264硬解=' + (window.MediaSource.isTypeSupported('video/mp4;codecs="avc1.42E01E,mp4a.40.2"') ? '支持' : '不支持'));
-      } catch (e) { parts.push('H264硬解=检测失败'); }
-      parts.push('Hls库=' + (typeof window.Hls === 'function' ? '已加载' : '未加载'));
-      parts.push('flvjs=' + (window.flvjs && flvjs.isSupported() ? '支持' : '不支持'));
-      var el = document.getElementById('diag');
-      if (el) el.textContent = '浏览器检测：' + parts.join('，');
-    })();
+  // ---------- 开机自检 ----------
+  (function diagnose() {
+    var parts = [];
+    var m = navigator.userAgent.match(/Firefox\/(\d+)/);
+    parts.push('浏览器=' + (m ? 'Firefox ' + m[1] : '其他'));
+    parts.push('MediaSource=' + (typeof window.MediaSource === 'function' ? '有' : '无'));
+    try {
+      parts.push('H264解码=' + (window.MediaSource.isTypeSupported('video/mp4;codecs="avc1.42E01E,mp4a.40.2"') ? '支持' : '不支持'));
+    } catch (e) { parts.push('H264解码=检测失败'); }
+    parts.push('Hls库=' + (typeof window.Hls === 'function' ? '已加载' : '未加载'));
+    parts.push('flvjs=' + (window.flvjs && flvjs.isSupported() ? '支持' : '不支持'));
+    parts.push('mqtt库=' + (typeof window.mqtt === 'object' ? '已加载' : '未加载'));
+    var el = document.getElementById('diag');
+    if (el) el.textContent = '浏览器检测：' + parts.join('，');
+  })();
 
-    var hls = null, flvPlayer = null;
-    var vstat = document.getElementById('vstat');
-    function setStat(t) { vstat.textContent = t || ''; }
-    function stopPlayers() {
-      if (hls) { try { hls.destroy(); } catch (e) {} hls = null; }
-      if (flvPlayer) { try { flvPlayer.unload(); flvPlayer.detachMediaElement(); flvPlayer.destroy(); } catch (e) {} flvPlayer = null; }
-      var video = document.getElementById('player');
-      try { video.pause(); } catch (e) {}
-      video.removeAttribute('src');
-      video.load();
-    }
-    document.getElementById('go').onclick = function () {
-      var url = document.getElementById('streamUrl').value.trim();
-      var room = document.getElementById('roomName').value.trim();
-      if (!url) { alert('先填直播链接'); return; }
-      if (!room) { alert('先填聊天房间名，两人填同一个'); return; }
-      setStat('');
-
-      document.getElementById('chat').src = 'https://tlk.io/' + encodeURIComponent(room);
-
-      stopPlayers();
-      var video = document.getElementById('player');
-      if (/\.m3u8(\?|#|$)/i.test(url)) {
-        // Safari 原生支持 HLS
-        if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = url;
-          video.play().catch(function () {});
-        } else if (window.Hls && Hls.isSupported()) {
-          hls = new Hls({ maxBufferLength: 30, liveSyncDurationCount: 3 });
-          hls.loadSource(url);
-          hls.attachMedia(video);
-          hls.on(Hls.Events.MANIFEST_PARSED, function () {
-            video.play().catch(function () {});
-          });
-          hls.on(Hls.Events.ERROR, function (ev, data) {
-            if (data.fatal) {
-              setStat('播放出错：' + (data.type || '') + '，检查链接是否有效，点"开始"重试');
-              try { hls.destroy(); } catch (e) {}
-              hls = null;
-            }
-          });
-        } else {
-          setStat('当前浏览器不支持 HLS，请换 Chrome / Edge / Firefox / Safari');
-        }
+  // ---------- 播放器（m3u8 走 HLS，flv 走 flv.js） ----------
+  var hls = null, flvPlayer = null;
+  var vstat = document.getElementById('vstat');
+  function setStat(t) { vstat.textContent = t || ''; }
+  function stopPlayers() {
+    if (hls) { try { hls.destroy(); } catch (e) {} hls = null; }
+    if (flvPlayer) { try { flvPlayer.unload(); flvPlayer.detachMediaElement(); flvPlayer.destroy(); } catch (e) {} flvPlayer = null; }
+    var video = document.getElementById('v');
+    try { video.pause(); } catch (e) {}
+    video.removeAttribute('src');
+    video.load();
+  }
+  document.getElementById('play').onclick = function () {
+    var url = document.getElementById('url').value.trim();
+    if (!url) { alert('先填直播链接'); return; }
+    setStat('');
+    stopPlayers();
+    var video = document.getElementById('v');
+    if (/\.m3u8(\?|#|$)/i.test(url)) {
+      if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url;
+        video.play().catch(function () {});
+      } else if (window.Hls && Hls.isSupported()) {
+        hls = new Hls({ maxBufferLength: 30, liveSyncDurationCount: 3 });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, function () { video.play().catch(function () {}); });
+        hls.on(Hls.Events.ERROR, function (ev, data) {
+          if (data.fatal) {
+            setStat('播放出错，检查链接是否有效，点"播放"重试');
+            try { hls.destroy(); } catch (e) {}
+            hls = null;
+          }
+        });
       } else {
-        // flv 备选
-        if (window.flvjs && flvjs.isSupported()) {
-          flvPlayer = flvjs.createPlayer({ type: 'flv', isLive: true, url: url });
-          flvPlayer.attachMediaElement(video);
-          flvPlayer.load();
-          flvPlayer.play().catch(function () {});
-        } else {
-          setStat('当前浏览器不支持 FLV，请换 Chrome / Edge');
-        }
+        setStat('当前浏览器不支持 HLS，请换 Chrome / Edge / Firefox / Safari');
       }
-    };
-  </script>
+    } else {
+      if (window.flvjs && flvjs.isSupported()) {
+        flvPlayer = flvjs.createPlayer({ type: 'flv', isLive: true, url: url });
+        flvPlayer.attachMediaElement(video);
+        flvPlayer.load();
+        video.muted = false;
+        flvPlayer.play().catch(function () {});
+      } else {
+        setStat('当前浏览器不支持 FLV，请换 Chrome / Edge');
+      }
+    }
+  };
+
+  // ---------- 聊天（MQTT） ----------
+  var myId = 'u' + Math.random().toString(36).slice(2, 10);
+  var client = null, topic = null, nick = '我', joined = false;
+  var msgsEl = document.getElementById('msgs');
+  var statusEl = document.getElementById('status');
+
+  function setStatus(t, ok) {
+    statusEl.textContent = t;
+    statusEl.className = ok ? 'ok' : '';
+  }
+  function fmtTime(ts) {
+    var d = new Date(ts);
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+  function addMsg(who, text, cls, ts) {
+    var div = document.createElement('div');
+    div.className = 'msg ' + cls;
+    if (cls === 'sys') {
+      div.textContent = text;
+    } else {
+      var w = document.createElement('div');
+      w.className = 'who';
+      w.textContent = who;
+      var b = document.createElement('div');
+      b.textContent = text;
+      var t = document.createElement('span');
+      t.className = 'time';
+      t.textContent = fmtTime(ts);
+      b.appendChild(t);
+      div.appendChild(w);
+      div.appendChild(b);
+    }
+    msgsEl.appendChild(div);
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  }
+
+  document.getElementById('joinBtn').onclick = function () {
+    if (typeof window.mqtt === 'undefined') { alert('聊天库未加载，刷新页面重试'); return; }
+    var room = document.getElementById('room').value.trim();
+    nick = document.getElementById('nick').value.trim() || '我';
+    if (!room) { alert('先填房间号，两人填同一个'); return; }
+    if (client) { try { client.end(); } catch (e) {} }
+    joined = false;
+    var brokerUrl = (document.getElementById('broker').value || '').trim() || 'wss://broker.emqx.io:8084/mqtt';
+    if (location.protocol === 'https:' && brokerUrl.indexOf('ws://') === 0) {
+      alert('HTTPS 页面不能连接 ws:// 服务器，请用 http:// 打开本页，或把聊天服务器换成 wss:// 地址');
+      return;
+    }
+    setStatus('连接中…');
+    client = mqtt.connect(brokerUrl, { connectTimeout: 8000 });
+    topic = 'yiwatch/' + room + '/chat';
+    client.on('connect', function () {
+      client.subscribe(topic, function (err) {
+        if (!err) {
+          joined = true;
+          setStatus('已进入房间：' + room, true);
+          addMsg('', '已进入房间，和对方打个招呼吧', 'sys');
+        } else {
+          setStatus('订阅失败，重试一下');
+        }
+      });
+    });
+    client.on('message', function (t, payload) {
+      if (t !== topic) return;
+      try {
+        var m = JSON.parse(payload.toString());
+        if (m.id === myId) return;
+        addMsg(m.nick || '对方', m.text || '', 'other', m.ts || Date.now());
+      } catch (e) {}
+    });
+    client.on('error', function () { setStatus('连接失败，检查网络后重试'); });
+    client.on('close', function () { if (joined) setStatus('连接断开，刷新页面重进'); });
+  };
+
+  function send() {
+    var input = document.getElementById('text');
+    var text = input.value.trim();
+    if (!text) return;
+    if (!joined || !client) { alert('先进入房间'); return; }
+    var m = { id: myId, nick: nick, text: text, ts: Date.now() };
+    client.publish(topic, JSON.stringify(m));
+    addMsg(nick, text, 'me', m.ts);
+    input.value = '';
+  }
+  document.getElementById('sendBtn').onclick = send;
+  document.getElementById('text').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') send();
+  });
+})();
+</script>
 </body>
 </html>
