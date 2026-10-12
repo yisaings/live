@@ -11,8 +11,8 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: #111; color: #eee; font-family: sans-serif; }
   #main { display: flex; gap: 14px; padding: 14px; max-width: 1200px; margin: 0 auto; min-height: 100vh; }
-  #left { flex: 3; min-width: 0; }
-  #right { flex: 1.2; min-width: 260px; display: flex; flex-direction: column; background: #1a1a1a; border-radius: 10px; padding: 12px; max-height: calc(100vh - 28px); }
+  #left { flex: 4; min-width: 0; }
+  #right { flex: 1; min-width: 200px; display: flex; flex-direction: column; background: #1a1a1a; border-radius: 10px; padding: 12px; max-height: calc(100vh - 28px); }
   h2 { margin: 4px 0 10px; font-size: 16px; font-weight: normal; color: #aaa; }
   #bar { display: flex; gap: 8px; margin-bottom: 6px; }
   #url { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 12px; min-width: 0; }
@@ -21,9 +21,9 @@
   video { width: 100%; background: #000; border-radius: 8px; aspect-ratio: 16/9; }
   #vstat { font-size: 12px; color: #e53935; min-height: 18px; padding: 2px 0; }
   #diag { font-size: 11px; color: #4caf50; word-break: break-all; margin-bottom: 6px; }
-  #join { display: flex; gap: 6px; margin-bottom: 8px; }
-  #join input { padding: 7px 9px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 13px; min-width: 0; }
-  #room { flex: 1.2; } #nick { flex: 1; }
+  #join { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  #join input { padding: 7px 9px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 13px; min-width: 0; width: 100%; }
+  #joinBtn { width: 100%; }
   #status { font-size: 12px; color: #888; margin-bottom: 8px; }
   #status.ok { color: #7CFC00; }
   #msgs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; min-height: 120px; }
@@ -48,6 +48,7 @@
     <div id="bar">
       <input id="url" type="text" value="https://play.marscrm.cn/live_10061762/1600046319_10061762_mix_all.m3u8" placeholder="直播链接（m3u8 推荐，flv 也行）">
       <button id="play">播放</button>
+      <button id="shareBtn" title="把当前链接和房间名拼成分享链接并复制">复制分享链接</button>
     </div>
     <video id="v" controls playsinline></video>
     <div id="vstat"></div>
@@ -79,6 +80,46 @@
 <script>
 (function () {
   'use strict';
+
+  // ---------- URL 参数预填：?url=xxx&room=yyy ----------
+  // 以后换直播不用改代码，直接发带参数的链接就行
+  (function prefillFromQuery() {
+    try {
+      var q = new URLSearchParams(location.search);
+      var u = q.get('url'), r = q.get('room');
+      if (u) document.getElementById('url').value = u;
+      if (r) document.getElementById('room').value = r;
+    } catch (e) {}
+  })();
+
+  function copyText(t, okMsg) {
+    function done() { alert(okMsg || '已复制'); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(done, function () { fallbackCopy(t, done); });
+    } else { fallbackCopy(t, done); }
+  }
+  function fallbackCopy(t, done) {
+    var ta = document.createElement('textarea');
+    ta.value = t;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); }
+    catch (e) { prompt('复制这个链接发给朋友：', t); }
+    document.body.removeChild(ta);
+  }
+
+  // 复制分享链接：把当前链接+房间名拼成 ?url=..&room=..
+  document.getElementById('shareBtn').onclick = function () {
+    var url = document.getElementById('url').value.trim();
+    var room = document.getElementById('room').value.trim();
+    if (!url) { alert('先填直播链接'); return; }
+    var link = location.origin + location.pathname +
+      '?url=' + encodeURIComponent(url) +
+      (room ? '&room=' + encodeURIComponent(room) : '');
+    copyText(link, '分享链接已复制，发给朋友就行，对方打开点开始即可');
+  };
 
   // ---------- 开机自检 ----------
   (function diagnose() {
