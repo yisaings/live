@@ -10,7 +10,7 @@
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; background: #111; color: #eee; font-family: sans-serif; }
-  #main { display: flex; gap: 14px; padding: 14px; max-width: 1200px; margin: 0 auto; min-height: 100vh; }
+  #main { display: flex; gap: 14px; padding: 14px; min-height: 100vh; }
   #left { flex: 4; min-width: 0; }
   #right { flex: 1; min-width: 200px; display: flex; flex-direction: column; background: #1a1a1a; border-radius: 10px; padding: 12px; max-height: calc(100vh - 28px); }
   h2 { margin: 4px 0 10px; font-size: 16px; font-weight: normal; color: #aaa; }
@@ -141,6 +141,27 @@
   var hls = null, flvPlayer = null;
   var vstat = document.getElementById('vstat');
   function setStat(t) { vstat.textContent = t || ''; }
+
+  // 混合内容修复：m3u8 里 http:// 的分片地址在 HTTPS 页面会被浏览器拦截，
+  // 在 playlist 加载层统一改写成 https://（HTTPS 页里 http 分片本来也播不了，改了只赚不亏）
+  function makeSchemeRewriteLoader(Base) {
+    function RewriteLoader() { Base.apply(this, arguments); }
+    RewriteLoader.prototype = Object.create(Base.prototype);
+    RewriteLoader.prototype.constructor = RewriteLoader;
+    RewriteLoader.prototype.load = function (context, config, callbacks) {
+      var origSuccess = callbacks.onSuccess;
+      callbacks.onSuccess = function (response, stats, ctx, networkDetails) {
+        try {
+          if (response && typeof response.data === 'string' && response.data.indexOf('http://') !== -1) {
+            response.data = response.data.split('http://').join('https://');
+          }
+        } catch (e) {}
+        origSuccess(response, stats, ctx, networkDetails);
+      };
+      Base.prototype.load.call(this, context, config, callbacks);
+    };
+    return RewriteLoader;
+  }
   function stopPlayers() {
     if (hls) { try { hls.destroy(); } catch (e) {} hls = null; }
     if (flvPlayer) { try { flvPlayer.unload(); flvPlayer.detachMediaElement(); flvPlayer.destroy(); } catch (e) {} flvPlayer = null; }
@@ -160,7 +181,11 @@
         video.src = url;
         video.play().catch(function () {});
       } else if (window.Hls && Hls.isSupported()) {
-        hls = new Hls({ maxBufferLength: 30, liveSyncDurationCount: 3 });
+        var hlsConfig = { maxBufferLength: 30, liveSyncDurationCount: 3 };
+        if (Hls.DefaultConfig && Hls.DefaultConfig.loader) {
+          hlsConfig.pLoader = makeSchemeRewriteLoader(Hls.DefaultConfig.loader);
+        }
+        hls = new Hls(hlsConfig);
         hls.loadSource(url);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, function () { video.play().catch(function () {}); });
