@@ -296,8 +296,14 @@
           joined = true;
           setStatus('已进入房间：' + room, true);
           addMsg('', '已进入房间，和对方打个招呼吧', 'sys');
+          // 自己直接进名单，不依赖服务器把消息回显回来（有些网络下回显到不了）
+          roster[myId] = { nick: nick, ts: Date.now() };
+          renderRoster();
           publishPresence('online');
-          hbTimer = setInterval(function () { publishPresence('online'); }, 30000);
+          hbTimer = setInterval(function () {
+            publishPresence('online');
+            if (roster[myId]) { roster[myId].ts = Date.now(); renderRoster(); }
+          }, 30000);
         } else {
           setStatus('订阅失败，重试一下');
         }
