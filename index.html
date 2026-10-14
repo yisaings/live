@@ -26,6 +26,8 @@
   #joinBtn { width: 100%; }
   #status { font-size: 12px; color: #888; margin-bottom: 8px; }
   #status.ok { color: #7CFC00; }
+  #roster { font-size: 12px; color: #7CFC00; margin-bottom: 8px; line-height: 1.7; display: none; }
+  #roster .pname.me { color: #64b5f6; }
   #msgs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; min-height: 120px; }
   .msg { max-width: 88%; padding: 7px 10px; border-radius: 10px; font-size: 14px; line-height: 1.5; word-break: break-all; }
   .msg .who { font-size: 11px; color: #999; margin-bottom: 2px; }
@@ -46,7 +48,7 @@
   <div id="left">
     <h2>📺 直播</h2>
     <div id="bar">
-      <input id="url" type="text" value="https://cctv.yisaw.com/cctv13.m3u8" placeholder="直播链接（m3u8 推荐，flv 也行）">
+      <input id="url" type="text" value="https://play.marscrm.cn/live_10061762/1600046319_10061762_mix_all.m3u8" placeholder="直播链接（m3u8 推荐，flv 也行）">
       <button id="play">播放</button>
       <button id="shareBtn" title="把当前链接和房间名拼成分享链接并复制">复制分享链接</button>
     </div>
@@ -69,6 +71,7 @@
       <div style="font-size:11px;color:#666;margin-top:4px;">对方连不上公共服务器时，改成自建的 ws://你的服务器IP:8083/mqtt（本页须用 http 打开，不能是 https）</div>
     </details>
     <div id="status">未连接</div>
+    <div id="roster"></div>
     <div id="msgs"></div>
     <div id="send">
       <input id="text" placeholder="说点什么…" maxlength="500">
@@ -217,6 +220,19 @@
   var client = null, topic = null, nick = '我', joined = false;
   var msgsEl = document.getElementById('msgs');
   var statusEl = document.getElementById('status');
+  var rosterEl = document.getElementById('roster');
+
+  // 昵称持久化：不用每次重填
+  try {
+    var savedNick = localStorage.getItem('yiwatch_nick');
+    if (savedNick) document.getElementById('nick').value = savedNick;
+  } catch (e) {}
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
 
   function setStatus(t, ok) {
     statusEl.textContent = t;
@@ -252,8 +268,12 @@
     if (typeof window.mqtt === 'undefined') { alert('聊天库未加载，刷新页面重试'); return; }
     var room = document.getElementById('room').value.trim();
     nick = document.getElementById('nick').value.trim() || '我';
+    try { localStorage.setItem('yiwatch_nick', nick); } catch (e) {}
     if (!room) { alert('先填房间号，两人填同一个'); return; }
     if (client) { try { client.end(); } catch (e) {} }
+    if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+    roster = {};
+    renderRoster();
     joined = false;
     var brokerUrl = (document.getElementById('broker').value || '').trim() || 'wss://broker.emqx.io:8084/mqtt';
     if (location.protocol === 'https:' && brokerUrl.indexOf('ws://') === 0) {
@@ -261,30 +281,92 @@
       return;
     }
     setStatus('连接中…');
-    client = mqtt.connect(brokerUrl, { connectTimeout: 8000 });
+    presBase = 'yiwatch/' + room + '/presence';
+    myPresTopic = presBase + '/' + myId;
+    // 遗嘱：异常断开（断网/崩溃）时服务器自动帮我发布"离线"
+    var willPayload = JSON.stringify({ nick: nick, ts: Date.now(), state: 'offline' });
+    client = mqtt.connect(brokerUrl, {
+      connectTimeout: 8000,
+      will: { topic: myPresTopic, payload: willPayload, retain: true, qos: 0 }
+    });
     topic = 'yiwatch/' + room + '/chat';
     client.on('connect', function () {
-      client.subscribe(topic, function (err) {
+      client.subscribe([topic, presBase + '/+'], function (err) {
         if (!err) {
           joined = true;
           setStatus('已进入房间：' + room, true);
           addMsg('', '已进入房间，和对方打个招呼吧', 'sys');
+          publishPresence('online');
+          hbTimer = setInterval(function () { publishPresence('online'); }, 30000);
         } else {
           setStatus('订阅失败，重试一下');
         }
       });
     });
     client.on('message', function (t, payload) {
-      if (t !== topic) return;
-      try {
-        var m = JSON.parse(payload.toString());
-        if (m.id === myId) return;
-        addMsg(m.nick || '对方', m.text || '', 'other', m.ts || Date.now());
-      } catch (e) {}
+      if (t === topic) {
+        try {
+          var m = JSON.parse(payload.toString());
+          if (m.id === myId) return;
+          addMsg(m.nick || '对方', m.text || '', 'other', m.ts || Date.now());
+        } catch (e) {}
+      } else if (presBase && t.indexOf(presBase + '/') === 0) {
+        handlePresence(t, payload);
+      }
     });
     client.on('error', function () { setStatus('连接失败，检查网络后重试'); });
     client.on('close', function () { if (joined) setStatus('连接断开，刷新页面重进'); });
   };
+
+  // ---------- 在线名单（Presence） ----------
+  // 每人一个 retained 的在线状态：yiwatch/<room>/presence/<id>
+  // 正常退出发 offline，异常断开靠遗嘱，心跳 30s 一次，95s 没心跳视为离线
+  var presBase = null, myPresTopic = null, roster = {}, hbTimer = null;
+
+  function publishPresence(state) {
+    if (!client || !myPresTopic) return;
+    try {
+      client.publish(myPresTopic,
+        JSON.stringify({ nick: nick, ts: Date.now(), state: state }),
+        { retain: true, qos: 0 });
+    } catch (e) {}
+  }
+  function handlePresence(t, payload) {
+    var id = t.slice(t.lastIndexOf('/') + 1);
+    try {
+      var m = JSON.parse(payload.toString());
+      var isNew = !roster[id];
+      if (m.state === 'offline') {
+        if (roster[id]) {
+          if (id !== myId) addMsg('', (roster[id].nick || '对方') + ' 离开了房间', 'sys');
+          delete roster[id];
+        }
+      } else {
+        roster[id] = { nick: m.nick || '对方', ts: m.ts || Date.now() };
+        if (isNew && id !== myId) addMsg('', (m.nick || '对方') + ' 进入了房间', 'sys');
+      }
+      renderRoster();
+    } catch (e) {}
+  }
+  function renderRoster() {
+    if (!rosterEl) return;
+    var now = Date.now(), list = [];
+    for (var id in roster) {
+      if (now - roster[id].ts < 95000) list.push({ id: id, nick: roster[id].nick });
+    }
+    list.sort(function (a, b) { return (a.id === myId ? -1 : 0) - (b.id === myId ? -1 : 0); });
+    if (!list.length) { rosterEl.style.display = 'none'; rosterEl.innerHTML = ''; return; }
+    rosterEl.style.display = '';
+    rosterEl.innerHTML = '在线 (' + list.length + '): ' +
+      list.map(function (p) {
+        return '<span class="pname' + (p.id === myId ? ' me' : '') + '">' +
+          escapeHtml(p.nick) + (p.id === myId ? '（我）' : '') + '</span>';
+      }).join('、');
+  }
+  // 定时清理掉线的人（95s 没心跳）
+  setInterval(function () { if (joined) renderRoster(); }, 30000);
+  // 正常关闭页面时主动发离线
+  window.addEventListener('beforeunload', function () { publishPresence('offline'); });
 
   function send() {
     var input = document.getElementById('text');
