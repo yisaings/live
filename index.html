@@ -133,140 +133,140 @@
     try {
       parts.push('H264解码=' + (window.MediaSource.isTypeSupported('video/mp4;codecs="avc1.42E01E,mp4a.40.2"') ? '支持' : '不支持'));
     } catch (e) { parts.push('H264解码=检测失败'); }
-    parts.push('Hls库=' + (typeof window.Hls === 'function' ? '已加载' : '未加载'));
-    parts.push('flvjs=' + (window.flvjs && flvjs.isSupported() ? '支持' : '不支持'));
-    parts.push('mqtt库=' + (typeof window.mqtt === 'object' ? '已加载' : '未加载'));
-    var el = document.getElementById('diag');
-    if (el) el.textContent = '浏览器检测：' + parts.join('，');
-  })();
+  parts.push('Hls库=' + (typeof window.Hls === 'function' ? '已加载' : '未加载'));
+  parts.push('flvjs=' + (window.flvjs && flvjs.isSupported() ? '支持' : '不支持'));
+  parts.push('mqtt库=' + (typeof window.mqtt === 'object' ? '已加载' : '未加载'));
+  var el = document.getElementById('diag');
+  if (el) el.textContent = '浏览器检测：' + parts.join('，');
+})();
 
-  // ---------- 播放器（m3u8 走 HLS，flv 走 flv.js） ----------
-  var hls = null, flvPlayer = null;
-  var vstat = document.getElementById('vstat');
-  function setStat(t) { vstat.textContent = t || ''; }
+// ---------- 播放器（m3u8 走 HLS，flv 走 flv.js） ----------
+var hls = null, flvPlayer = null;
+var vstat = document.getElementById('vstat');
+function setStat(t) { vstat.textContent = t || ''; }
 
-  // 混合内容修复：m3u8 里 http:// 的分片地址在 HTTPS 页面会被浏览器拦截，
-  // 在 playlist 加载层统一改写成 https://（HTTPS 页里 http 分片本来也播不了，改了只赚不亏）
-  function makeSchemeRewriteLoader(Base) {
-    function RewriteLoader() { Base.apply(this, arguments); }
-    RewriteLoader.prototype = Object.create(Base.prototype);
-    RewriteLoader.prototype.constructor = RewriteLoader;
-    RewriteLoader.prototype.load = function (context, config, callbacks) {
-      var origSuccess = callbacks.onSuccess;
-      callbacks.onSuccess = function (response, stats, ctx, networkDetails) {
-        try {
-          if (response && typeof response.data === 'string' && response.data.indexOf('http://') !== -1) {
-            response.data = response.data.split('http://').join('https://');
-          }
-        } catch (e) {}
-        origSuccess(response, stats, ctx, networkDetails);
-      };
-      Base.prototype.load.call(this, context, config, callbacks);
-    };
-    return RewriteLoader;
-  }
-  function stopPlayers() {
-    if (hls) { try { hls.destroy(); } catch (e) {} hls = null; }
-    if (flvPlayer) { try { flvPlayer.unload(); flvPlayer.detachMediaElement(); flvPlayer.destroy(); } catch (e) {} flvPlayer = null; }
-    var video = document.getElementById('v');
-    try { video.pause(); } catch (e) {}
-    video.removeAttribute('src');
-    video.load();
-  }
-  document.getElementById('play').onclick = function () {
-    var url = document.getElementById('url').value.trim();
-    if (!url) { alert('先填直播链接'); return; }
-    setStat('');
-    stopPlayers();
-    var video = document.getElementById('v');
-    if (/\.m3u8(\?|#|$)/i.test(url)) {
-      if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = url;
-        video.play().catch(function () {});
-      } else if (window.Hls && Hls.isSupported()) {
-        var hlsConfig = { maxBufferLength: 30, liveSyncDurationCount: 3 };
-        if (Hls.DefaultConfig && Hls.DefaultConfig.loader) {
-          hlsConfig.pLoader = makeSchemeRewriteLoader(Hls.DefaultConfig.loader);
+// 混合内容修复：m3u8 里 http:// 的分片地址在 HTTPS 页面会被浏览器拦截，
+// 在 playlist 加载层统一改写成 https://（HTTPS 页里 http 分片本来也播不了，改了只赚不亏）
+function makeSchemeRewriteLoader(Base) {
+  function RewriteLoader() { Base.apply(this, arguments); }
+  RewriteLoader.prototype = Object.create(Base.prototype);
+  RewriteLoader.prototype.constructor = RewriteLoader;
+  RewriteLoader.prototype.load = function (context, config, callbacks) {
+    var origSuccess = callbacks.onSuccess;
+    callbacks.onSuccess = function (response, stats, ctx, networkDetails) {
+      try {
+        if (response && typeof response.data === 'string' && response.data.indexOf('http://') !== -1) {
+          response.data = response.data.split('http://').join('https://');
         }
-        hls = new Hls(hlsConfig);
-        hls.loadSource(url);
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, function () { video.play().catch(function () {}); });
-        hls.on(Hls.Events.ERROR, function (ev, data) {
-          if (data.fatal) {
-            setStat('播放出错，检查链接是否有效，点"播放"重试');
-            try { hls.destroy(); } catch (e) {}
-            hls = null;
-          }
-        });
-      } else {
-        setStat('当前浏览器不支持 HLS，请换 Chrome / Edge / Firefox / Safari');
-      }
-    } else {
-      if (window.flvjs && flvjs.isSupported()) {
-        flvPlayer = flvjs.createPlayer({ type: 'flv', isLive: true, url: url });
-        flvPlayer.attachMediaElement(video);
-        flvPlayer.load();
-        video.muted = false;
-        flvPlayer.play().catch(function () {});
-      } else {
-        setStat('当前浏览器不支持 FLV，请换 Chrome / Edge');
-      }
-    }
+      } catch (e) {}
+      origSuccess(response, stats, ctx, networkDetails);
+    };
+    Base.prototype.load.call(this, context, config, callbacks);
   };
-
-  // ---------- 聊天（MQTT） ----------
-  var myId = 'u' + Math.random().toString(36).slice(2, 10);
-  var client = null, topic = null, nick = '我', joined = false;
-  var msgsEl = document.getElementById('msgs');
-  var statusEl = document.getElementById('status');
-  var rosterEl = document.getElementById('roster');
-
-  // 昵称持久化：不用每次重填
-  try {
-    var savedNick = localStorage.getItem('yiwatch_nick');
-    if (savedNick) document.getElementById('nick').value = savedNick;
-  } catch (e) {}
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-    });
-  }
-
-  function setStatus(t, ok) {
-    statusEl.textContent = t;
-    statusEl.className = ok ? 'ok' : '';
-  }
-  function fmtTime(ts) {
-    var d = new Date(ts);
-    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
-  }
-  function addMsg(who, text, cls, ts) {
-    var div = document.createElement('div');
-    div.className = 'msg ' + cls;
-    if (cls === 'sys') {
-      div.textContent = text;
+  return RewriteLoader;
+}
+function stopPlayers() {
+  if (hls) { try { hls.destroy(); } catch (e) {} hls = null; }
+  if (flvPlayer) { try { flvPlayer.unload(); flvPlayer.detachMediaElement(); flvPlayer.destroy(); } catch (e) {} flvPlayer = null; }
+  var video = document.getElementById('v');
+  try { video.pause(); } catch (e) {}
+  video.removeAttribute('src');
+  video.load();
+}
+document.getElementById('play').onclick = function () {
+  var url = document.getElementById('url').value.trim();
+  if (!url) { alert('先填直播链接'); return; }
+  setStat('');
+  stopPlayers();
+  var video = document.getElementById('v');
+  if (/\.m3u8(\?|#|$)/i.test(url)) {
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+      video.play().catch(function () {});
+    } else if (window.Hls && Hls.isSupported()) {
+      var hlsConfig = { maxBufferLength: 30, liveSyncDurationCount: 3 };
+      if (Hls.DefaultConfig && Hls.DefaultConfig.loader) {
+        hlsConfig.pLoader = makeSchemeRewriteLoader(Hls.DefaultConfig.loader);
+      }
+      hls = new Hls(hlsConfig);
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, function () { video.play().catch(function () {}); });
+      hls.on(Hls.Events.ERROR, function (ev, data) {
+        if (data.fatal) {
+          setStat('播放出错，检查链接是否有效，点"播放"重试');
+          try { hls.destroy(); } catch (e) {}
+          hls = null;
+        }
+      });
     } else {
-      var w = document.createElement('div');
-      w.className = 'who';
-      w.textContent = who;
-      var b = document.createElement('div');
-      b.textContent = text;
-      var t = document.createElement('span');
-      t.className = 'time';
-      t.textContent = fmtTime(ts);
-      b.appendChild(t);
-      div.appendChild(w);
-      div.appendChild(b);
+      setStat('当前浏览器不支持 HLS，请换 Chrome / Edge / Firefox / Safari');
     }
-    msgsEl.appendChild(div);
-    msgsEl.scrollTop = msgsEl.scrollHeight;
+  } else {
+    if (window.flvjs && flvjs.isSupported()) {
+      flvPlayer = flvjs.createPlayer({ type: 'flv', isLive: true, url: url });
+      flvPlayer.attachMediaElement(video);
+      flvPlayer.load();
+      video.muted = false;
+      flvPlayer.play().catch(function () {});
+    } else {
+      setStat('当前浏览器不支持 FLV，请换 Chrome / Edge');
+    }
   }
+};
 
-  document.getElementById('joinBtn').onclick = function () {
-    if (typeof window.mqtt === 'undefined') { alert('聊天库未加载，刷新页面重试'); return; }
-    var room = document.getElementById('room').value.trim();
+// ---------- 聊天（MQTT） ----------
+var myId = 'u' + Math.random().toString(36).slice(2, 10);
+var client = null, topic = null, nick = '我', joined = false;
+var msgsEl = document.getElementById('msgs');
+var statusEl = document.getElementById('status');
+var rosterEl = document.getElementById('roster');
+
+// 昵称持久化：不用每次重填
+try {
+  var savedNick = localStorage.getItem('yiwatch_nick');
+  if (savedNick) document.getElementById('nick').value = savedNick;
+} catch (e) {}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function setStatus(t, ok) {
+  statusEl.textContent = t;
+  statusEl.className = ok ? 'ok' : '';
+}
+function fmtTime(ts) {
+  var d = new Date(ts);
+  return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+}
+function addMsg(who, text, cls, ts) {
+  var div = document.createElement('div');
+  div.className = 'msg ' + cls;
+  if (cls === 'sys') {
+    div.textContent = text;
+  } else {
+    var w = document.createElement('div');
+    w.className = 'who';
+    w.textContent = who;
+    var b = document.createElement('div');
+    b.textContent = text;
+    var t = document.createElement('span');
+    t.className = 'time';
+    t.textContent = fmtTime(ts);
+    b.appendChild(t);
+    div.appendChild(w);
+    div.appendChild(b);
+  }
+  msgsEl.appendChild(div);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+
+document.getElementById('joinBtn').onclick = function () {
+  if (typeof window.mqtt === 'undefined') { alert('聊天库未加载，刷新页面重试'); return; }
+  var room = document.getElementById('room').value.trim();
     nick = document.getElementById('nick').value.trim() || '我';
     try { localStorage.setItem('yiwatch_nick', nick); } catch (e) {}
     if (!room) { alert('先填房间号，两人填同一个'); return; }
@@ -362,7 +362,7 @@
     }
     list.sort(function (a, b) { return (a.id === myId ? -1 : 0) - (b.id === myId ? -1 : 0); });
     if (!list.length) { rosterEl.style.display = 'none'; rosterEl.innerHTML = ''; return; }
-    rosterEl.style.display = '';
+    rosterEl.style.display = 'block';
     rosterEl.innerHTML = '在线 (' + list.length + '): ' +
       list.map(function (p) {
         return '<span class="pname' + (p.id === myId ? ' me' : '') + '">' +
