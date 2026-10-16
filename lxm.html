@@ -141,6 +141,7 @@
     } else {
       if (!m.imgUrl) return;
       wrap.style.background = '#000';
+      boardImg.removeAttribute('src');  // 翻页清掉旧 PNG 笔迹
       boardSvgLayer.innerHTML = '';  // 翻页清掉旧笔迹，等新推送
       var url = m.imgUrl;
       // 百家云图片去掉 OSS 缩放参数，拿原图更清晰
@@ -161,6 +162,26 @@
   }
   function onBoard(m) {
     if (!m) return;
+    if (m.texts) {
+      // v2.5：文本工具打上去的字，按相对位置和相对字号还原
+      boardImg.removeAttribute('src');
+      boardSvgLayer.innerHTML = '';
+      fitSvgLayer();
+      var boxW = boardSvgLayer.clientWidth || 1;
+      m.texts.forEach(function (T) {
+        var d = document.createElement('div');
+        d.style.position = 'absolute';
+        d.style.left = (T.x * 100) + '%';
+        d.style.top = (T.y * 100) + '%';
+        d.style.fontSize = (T.fs * boxW) + 'px';
+        d.style.color = T.c || '#f00';
+        if (T.b) d.style.fontWeight = 'bold';
+        d.style.whiteSpace = 'nowrap';
+        d.textContent = T.t;
+        boardSvgLayer.appendChild(d);
+      });
+      return;
+    }
     if (m.layers) {
       // v2.4：SVG 笔迹图层，按白板容器的百分比定位
       boardImg.removeAttribute('src');
