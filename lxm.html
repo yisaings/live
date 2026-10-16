@@ -18,11 +18,12 @@
   #slideImg { width: 100%; display: block; }
   #boardImg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
   #pageTag { position: absolute; left: 10px; top: 8px; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; padding: 3px 10px; border-radius: 12px; z-index: 5; }
-  /* 老师视频小窗：浮在课件右上角，和官方一致 */
-  #videoFloat { position: absolute; top: 10px; right: 10px; width: 26%; max-width: 300px; min-width: 160px; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,.55); z-index: 10; background: #000; }
-  #videoFloat video { width: 100%; aspect-ratio: 16/9; display: block; background: #000; }
   #slideStat { font-size: 12px; color: #888; min-height: 18px; }
+  /* 右列：视频在上，聊天在下 */
+  #videoWrap { background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
+  #videoWrap video { width: 100%; display: block; aspect-ratio: 16/9; background: #000; }
   #vstat { font-size: 12px; color: #e53935; min-height: 18px; padding: 2px 0; }
+  #chatBox { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   /* 右侧聊天（复用） */
   #join { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
   #join input { padding: 7px 9px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 13px; min-width: 0; width: 100%; }
@@ -55,14 +56,18 @@
       <div id="slideWrap">
         <img id="slideImg" alt="等待广播端推送课件…" referrerpolicy="no-referrer">
         <img id="boardImg" alt="" referrerpolicy="no-referrer">
-        <div id="videoFloat"><video id="v" controls playsinline></video></div>
       </div>
       <div id="slideStat">等待广播端上线…</div>
-      <div id="vstat"></div>
     </div>
   </div>
   <div id="right">
-    <h2>💬 聊天</h2>
+    <div>
+      <h2>📺 老师视频</h2>
+      <div id="videoWrap"><video id="v" controls playsinline></video></div>
+      <div id="vstat"></div>
+    </div>
+    <div id="chatBox">
+      <h2>💬 聊天</h2>
     <div id="join">
       <input id="room" placeholder="房间号（和广播端填同一个）">
       <input id="nick" placeholder="昵称">
@@ -76,6 +81,7 @@
       <button id="sendBtn">发送</button>
     </div>
     <div id="tip">课件、白板、视频由广播端实时推送。两人填同一个房间号。</div>
+    </div>
   </div>
 </div>
 <script>
@@ -100,11 +106,23 @@
   var slideStat = document.getElementById('slideStat');
 
   function onSlide(m) {
-    if (!m || !m.imgUrl) return;
-    slideImg.src = m.imgUrl;
-    if (m.page) {
+    if (!m) return;
+    if (m.blank) {
+      // 空白页：清空课件图，白底
+      slideImg.removeAttribute('src');
+      slideImg.style.background = '#fff';
+      slideImg.style.minHeight = '400px';
       pageTag.style.display = '';
-      pageTag.textContent = '第 ' + m.page + ' 页';
+      pageTag.textContent = '空白页';
+    } else {
+      if (!m.imgUrl) return;
+      slideImg.style.background = '';
+      slideImg.style.minHeight = '';
+      slideImg.src = m.imgUrl;
+      if (m.page) {
+        pageTag.style.display = '';
+        pageTag.textContent = '第 ' + m.page + ' 页';
+      }
     }
     slideStat.textContent = '课件已同步';
     slideStat.style.color = '#4caf50';
