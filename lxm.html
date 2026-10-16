@@ -162,6 +162,12 @@
   }
   function onBoard(m) {
     if (!m) return;
+    if (m.clear) {
+      // v2.6.1：老师清空了笔迹
+      boardImg.removeAttribute('src');
+      boardSvgLayer.innerHTML = '';
+      return;
+    }
     if (m.texts) {
       // v2.5：文本工具打上去的字，按相对位置和相对字号还原
       boardImg.removeAttribute('src');
