@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>课程同看</title>
+<script src="./flv.min.js"></script>
+<script src="./mqtt.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #111; color: #eee; font-family: sans-serif; }
+  #main { display: flex; gap: 14px; padding: 14px; min-height: 100vh; }
+  #left { flex: 4; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  #right { flex: 1; min-width: 220px; display: flex; flex-direction: column; background: #1a1a1a; border-radius: 10px; padding: 12px; max-height: calc(100vh - 28px); }
+  h2 { margin: 4px 0 10px; font-size: 16px; font-weight: normal; color: #aaa; }
+  /* 课件区 */
+  #slideWrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; min-height: 300px; }
+  #slideImg { width: 100%; display: block; }
+  #boardImg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+  #pageTag { position: absolute; left: 10px; top: 8px; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; padding: 3px 10px; border-radius: 12px; }
+  #slideStat { font-size: 12px; color: #888; min-height: 18px; }
+  /* 视频区 */
+  #videoWrap { background: #000; border-radius: 8px; overflow: hidden; }
+  video { width: 100%; display: block; aspect-ratio: 16/9; background: #000; }
+  #vstat { font-size: 12px; color: #e53935; min-height: 18px; padding: 2px 0; }
+  /* 右侧聊天（复用） */
+  #join { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  #join input { padding: 7px 9px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 13px; min-width: 0; width: 100%; }
+  #joinBtn { width: 100%; padding: 8px 16px; border-radius: 6px; border: none; background: #1e88e5; color: #fff; font-size: 14px; cursor: pointer; }
+  #status { font-size: 12px; color: #888; margin-bottom: 8px; }
+  #status.ok { color: #7CFC00; }
+  #roster { font-size: 12px; color: #7CFC00; margin-bottom: 8px; line-height: 1.7; display: none; }
+  #roster .pname.me { color: #64b5f6; }
+  #msgs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; min-height: 120px; }
+  .msg { max-width: 88%; padding: 7px 10px; border-radius: 10px; font-size: 14px; line-height: 1.5; word-break: break-all; }
+  .msg .who { font-size: 11px; color: #999; margin-bottom: 2px; }
+  .msg.me { align-self: flex-end; background: #1e88e5; }
+  .msg.me .who { color: #cfe6ff; }
+  .msg.other { align-self: flex-start; background: #2c2c2c; }
+  .msg.sys { align-self: center; background: none; color: #777; font-size: 12px; padding: 2px 6px; }
+  .msg .time { font-size: 10px; color: rgba(255,255,255,.45); margin-left: 6px; }
+  .msg.other .time { color: #888; }
+  #send { display: flex; gap: 6px; margin-top: 8px; }
+  #text { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 14px; min-width: 0; }
+  #sendBtn { padding: 8px 16px; border-radius: 6px; border: none; background: #1e88e5; color: #fff; font-size: 14px; cursor: pointer; white-space: nowrap; }
+  #tip { font-size: 11px; color: #666; margin-top: 8px; line-height: 1.6; }
+  @media (max-width: 760px) { #main { flex-direction: column; } #right { max-height: 60vh; } }
+</style>
+</head>
+<body>
+<div id="main">
+  <div id="left">
+    <div>
+      <h2>📖 课件 <span id="pageTag" style="display:none"></span></h2>
+      <div id="slideWrap">
+        <img id="slideImg" alt="等待广播端推送课件…">
+        <img id="boardImg" alt="">
+      </div>
+      <div id="slideStat">等待广播端上线…</div>
+    </div>
+    <div>
+      <h2>📺 老师视频</h2>
+      <div id="videoWrap"><video id="v" controls playsinline></video></div>
+      <div id="vstat"></div>
+    </div>
+  </div>
+  <div id="right">
+    <h2>💬 聊天</h2>
+    <div id="join">
+      <input id="room" placeholder="房间号（和广播端填同一个）">
+      <input id="nick" placeholder="昵称">
+      <button id="joinBtn">进入</button>
+    </div>
+    <div id="status">未连接</div>
+    <div id="roster"></div>
+    <div id="msgs"></div>
+    <div id="send">
+      <input id="text" placeholder="说点什么…" maxlength="500">
+      <button id="sendBtn">发送</button>
+    </div>
+    <div id="tip">课件、白板、视频由广播端实时推送。两人填同一个房间号。</div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  // ---------- URL 参数预填：?room=yyy ----------
+  (function prefillFromQuery() {
+    try {
+      var q = new URLSearchParams(location.search);
+      var r = q.get('room');
+      if (r) document.getElementById('room').value = r;
+    } catch (e) {}
+  })();
+
+  var BROKER = 'wss://broker.emqx.io:8084/mqtt';
+
+  // ---------- 课件 + 白板 ----------
+  var slideImg = document.getElementById('slideImg');
+  var boardImg = document.getElementById('boardImg');
+  var pageTag = document.getElementById('pageTag');
+  var slideStat = document.getElementById('slideStat');
+
+  function onSlide(m) {
+    if (!m || !m.imgUrl) return;
+    slideImg.src = m.imgUrl;
+    if (m.page) {
+      pageTag.style.display = '';
+      pageTag.textContent = '第 ' + m.page + ' 页';
+    }
+    slideStat.textContent = '课件已同步';
+    slideStat.style.color = '#4caf50';
+  }
+  function onBoard(m) {
+    if (!m || !m.img) return;
+    boardImg.src = m.img;
+  }
+
+  // ---------- 视频（flv） ----------
+  var flvPlayer = null;
+  var vstat = document.getElementById('vstat');
+  function setVStat(t) { vstat.textContent = t || ''; }
+  function playFlv(url) {
+    var video = document.getElementById('v');
+    if (flvPlayer) {
+      try { flvPlayer.unload(); flvPlayer.detachMediaElement(); flvPlayer.destroy(); } catch (e) {}
+      flvPlayer = null;
+    }
+    if (!window.flvjs || !flvjs.isSupported()) {
+      setVStat('当前浏览器不支持 FLV，请换 Chrome / Edge');
+      return;
+    }
+    setVStat('');
+    flvPlayer = flvjs.createPlayer({ type: 'flv', isLive: true, url: url });
+    flvPlayer.attachMediaElement(video);
+    flvPlayer.load();
+    flvPlayer.play().catch(function () {});
+  }
+  function onStream(m) {
+    if (!m || !m.url) return;
+    playFlv(m.url);
+  }
+
+  // ---------- MQTT ----------
+  var myId = 'u' + Math.random().toString(36).slice(2, 10);
+  var client = null, nick = '我', joined = false;
+  var chatTopic = null, presBase = null, myPresTopic = null;
+  var slideTopic = null, boardTopic = null, streamTopic = null;
+  var roster = {}, hbTimer = null;
+
+  var msgsEl = document.getElementById('msgs');
+  var statusEl = document.getElementById('status');
+  var rosterEl = document.getElementById('roster');
+
+  try {
+    var savedNick = localStorage.getItem('yiwatch_nick');
+    if (savedNick) document.getElementById('nick').value = savedNick;
+  } catch (e) {}
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function setStatus(t, ok) { statusEl.textContent = t; statusEl.className = ok ? 'ok' : ''; }
+  function fmtTime(ts) {
+    var d = new Date(ts);
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+  function addMsg(who, text, cls, ts) {
+    var div = document.createElement('div');
+    div.className = 'msg ' + cls;
+    if (cls === 'sys') { div.textContent = text; }
+    else {
+      var w = document.createElement('div'); w.className = 'who'; w.textContent = who;
+      var b = document.createElement('div'); b.textContent = text;
+      var t = document.createElement('span'); t.className = 'time'; t.textContent = fmtTime(ts);
+      b.appendChild(t); div.appendChild(w); div.appendChild(b);
+    }
+    msgsEl.appendChild(div);
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  }
+
+  document.getElementById('joinBtn').onclick = function () {
+    if (typeof window.mqtt === 'undefined') { alert('MQTT 库未加载，刷新重试'); return; }
+    var room = document.getElementById('room').value.trim();
+    nick = document.getElementById('nick').value.trim() || '我';
+    try { localStorage.setItem('yiwatch_nick', nick); } catch (e) {}
+    if (!room) { alert('先填房间号'); return; }
+    if (client) { try { client.end(); } catch (e) {} }
+    if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+    roster = {};
+    renderRoster();
+    joined = false;
+
+    setStatus('连接中…');
+    var base = 'yiwatch/' + room;
+    chatTopic = base + '/chat';
+    slideTopic = base + '/slide';
+    boardTopic = base + '/board';
+    streamTopic = base + '/stream';
+    presBase = base + '/presence';
+    myPresTopic = presBase + '/' + myId;
+
+    var willPayload = JSON.stringify({ nick: nick, ts: Date.now(), state: 'offline' });
+    client = mqtt.connect(BROKER, {
+      connectTimeout: 8000,
+      will: { topic: myPresTopic, payload: willPayload, retain: true, qos: 0 }
+    });
+
+    client.on('connect', function () {
+      client.subscribe([chatTopic, slideTopic, boardTopic, streamTopic, presBase + '/+'], function (err) {
+        if (!err) {
+          joined = true;
+          setStatus('已进入房间：' + room, true);
+          addMsg('', '已进入房间，等待广播端推送…', 'sys');
+          roster[myId] = { nick: nick, ts: Date.now() };
+          renderRoster();
+          publishPresence('online');
+          hbTimer = setInterval(function () {
+            publishPresence('online');
+            if (roster[myId]) { roster[myId].ts = Date.now(); renderRoster(); }
+          }, 30000);
+        } else { setStatus('订阅失败，重试一下'); }
+      });
+    });
+
+    client.on('message', function (t, payload) {
+      try {
+        var s = payload.toString();
+        if (t === chatTopic) {
+          var m = JSON.parse(s);
+          if (m.id === myId) return;
+          addMsg(m.nick || '对方', m.text || '', 'other', m.ts || Date.now());
+        } else if (t === slideTopic) {
+          onSlide(JSON.parse(s));
+        } else if (t === boardTopic) {
+          onBoard(JSON.parse(s));
+        } else if (t === streamTopic) {
+          onStream(JSON.parse(s));
+        } else if (presBase && t.indexOf(presBase + '/') === 0) {
+          handlePresence(t, payload);
+        }
+      } catch (e) {}
+    });
+    client.on('error', function () { setStatus('连接失败，检查网络后重试'); });
+    client.on('close', function () { if (joined) setStatus('连接断开，刷新页面重进'); });
+  };
+
+  // ---------- 在线名单 ----------
+  function publishPresence(state) {
+    if (!client || !myPresTopic) return;
+    try {
+      client.publish(myPresTopic, JSON.stringify({ nick: nick, ts: Date.now(), state: state }), { retain: true, qos: 0 });
+    } catch (e) {}
+  }
+  function handlePresence(t, payload) {
+    var id = t.slice(t.lastIndexOf('/') + 1);
+    try {
+      var m = JSON.parse(payload.toString());
+      var isNew = !roster[id];
+      if (m.state === 'offline') {
+        if (roster[id]) {
+          if (id !== myId) addMsg('', (roster[id].nick || '对方') + ' 离开了房间', 'sys');
+          delete roster[id];
+        }
+      } else {
+        roster[id] = { nick: m.nick || '对方', ts: m.ts || Date.now() };
+        if (isNew && id !== myId) addMsg('', (m.nick || '对方') + ' 进入了房间', 'sys');
+      }
+      renderRoster();
+    } catch (e) {}
+  }
+  function renderRoster() {
+    if (!rosterEl) return;
+    var now = Date.now(), list = [];
+    for (var id in roster) {
+      if (now - roster[id].ts < 95000) list.push({ id: id, nick: roster[id].nick });
+    }
+    list.sort(function (a, b) { return (a.id === myId ? -1 : 0) - (b.id === myId ? -1 : 0); });
+    if (!list.length) { rosterEl.style.display = 'none'; rosterEl.innerHTML = ''; return; }
+    rosterEl.style.display = 'block';
+    rosterEl.innerHTML = '在线 (' + list.length + '): ' +
+      list.map(function (p) {
+        return '<span class="pname' + (p.id === myId ? ' me' : '') + '">' +
+          escapeHtml(p.nick) + (p.id === myId ? '（我）' : '') + '</span>';
+      }).join('、');
+  }
+  setInterval(function () { if (joined) renderRoster(); }, 30000);
+  window.addEventListener('beforeunload', function () { publishPresence('offline'); });
+
+  // ---------- 聊天发送 ----------
+  function send() {
+    var input = document.getElementById('text');
+    var text = input.value.trim();
+    if (!text) return;
+    if (!joined || !client) { alert('先进入房间'); return; }
+    var m = { id: myId, nick: nick, text: text, ts: Date.now() };
+    client.publish(chatTopic, JSON.stringify(m));
+    addMsg(nick, text, 'me', m.ts);
+    input.value = '';
+  }
+  document.getElementById('sendBtn').onclick = send;
+  document.getElementById('text').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') send();
+  });
+})();
+</script>
+</body>
+</html>
