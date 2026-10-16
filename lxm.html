@@ -18,6 +18,9 @@
   #slideWrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; flex: 1; min-height: 0; }
   #slideImg, #boardImg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: contain; }
   #boardImg { pointer-events: none; }
+  #boardSvgLayer { position: absolute; pointer-events: none; overflow: hidden; }
+  .boardSvg { position: absolute; overflow: hidden; }
+  .boardSvg svg { width: 100%; height: 100%; display: block; }
   #pageTag { position: absolute; left: 10px; top: 8px; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; padding: 3px 10px; border-radius: 12px; z-index: 5; }
   #slideStat { font-size: 12px; color: #888; min-height: 18px; }
   /* 右列：视频在上，聊天在下 */
@@ -57,6 +60,7 @@
       <div id="slideWrap">
         <img id="slideImg" alt="等待广播端推送课件…" referrerpolicy="no-referrer">
         <img id="boardImg" alt="" referrerpolicy="no-referrer">
+        <div id="boardSvgLayer"></div>
       </div>
       <div id="slideStat">等待广播端上线…</div>
     </div>
@@ -103,21 +107,41 @@
   // ---------- 课件 + 白板 ----------
   var slideImg = document.getElementById('slideImg');
   var boardImg = document.getElementById('boardImg');
+  var boardSvgLayer = document.getElementById('boardSvgLayer');
   var pageTag = document.getElementById('pageTag');
   var slideStat = document.getElementById('slideStat');
+
+  // SVG 笔迹层要和课件图（object-fit:contain）的实际显示区域对齐：
+  // 按图片等比缩放后的矩形给图层容器定位
+  function fitSvgLayer() {
+    var wrap = document.getElementById('slideWrap');
+    var W = wrap.clientWidth, H = wrap.clientHeight;
+    if (!W || !H) return;
+    var iw = slideImg.naturalWidth || 16, ih = slideImg.naturalHeight || 9;
+    var s = Math.min(W / iw, H / ih);
+    var w = iw * s, h = ih * s;
+    boardSvgLayer.style.left = ((W - w) / 2) + 'px';
+    boardSvgLayer.style.top = ((H - h) / 2) + 'px';
+    boardSvgLayer.style.width = w + 'px';
+    boardSvgLayer.style.height = h + 'px';
+  }
+  slideImg.addEventListener('load', fitSvgLayer);
+  window.addEventListener('resize', fitSvgLayer);
 
   function onSlide(m) {
     if (!m) return;
     var wrap = document.getElementById('slideWrap');
     if (m.blank) {
-      // 空白页：清空课件图，白底
+      // 空白页：清空课件图和笔迹层，白底
       slideImg.removeAttribute('src');
+      boardSvgLayer.innerHTML = '';
       wrap.style.background = '#fff';
       pageTag.style.display = '';
       pageTag.textContent = '空白页';
     } else {
       if (!m.imgUrl) return;
       wrap.style.background = '#000';
+      boardSvgLayer.innerHTML = '';  // 翻页清掉旧笔迹，等新推送
       var url = m.imgUrl;
       // 百家云图片去掉 OSS 缩放参数，拿原图更清晰
       if (url.indexOf('img.baijiayun.com') !== -1 && url.indexOf('?') !== -1) {
@@ -136,8 +160,25 @@
     slideStat.style.color = '#4caf50';
   }
   function onBoard(m) {
-    if (!m || !m.img) return;
-    boardImg.src = m.img;
+    if (!m) return;
+    if (m.layers) {
+      // v2.4：SVG 笔迹图层，按白板容器的百分比定位
+      boardImg.removeAttribute('src');
+      boardSvgLayer.innerHTML = '';
+      m.layers.forEach(function (L) {
+        var d = document.createElement('div');
+        d.className = 'boardSvg';
+        d.style.left = (L.x * 100) + '%';
+        d.style.top = (L.y * 100) + '%';
+        d.style.width = (L.w * 100) + '%';
+        d.style.height = (L.h * 100) + '%';
+        d.innerHTML = L.html;
+        boardSvgLayer.appendChild(d);
+      });
+      fitSvgLayer();
+      return;
+    }
+    if (m.img) boardImg.src = m.img;  // 旧版 PNG 兼容
   }
 
   // ---------- 视频（flv） ----------
