@@ -11,12 +11,13 @@
   body { margin: 0; background: #111; color: #eee; font-family: sans-serif; }
   #main { display: flex; gap: 14px; padding: 14px; min-height: 100vh; }
   #left { flex: 4; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  #left > div { display: flex; flex-direction: column; height: calc(100vh - 28px); }
   #right { flex: 1; min-width: 220px; display: flex; flex-direction: column; background: #1a1a1a; border-radius: 10px; padding: 12px; max-height: calc(100vh - 28px); }
   h2 { margin: 4px 0 10px; font-size: 16px; font-weight: normal; color: #aaa; }
-  /* 课件区 */
-  #slideWrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; min-height: 300px; }
-  #slideImg { width: 100%; display: block; }
-  #boardImg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+  /* 课件区：铺满可用高度，整页不滚动 */
+  #slideWrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; flex: 1; min-height: 0; }
+  #slideImg, #boardImg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: contain; }
+  #boardImg { pointer-events: none; }
   #pageTag { position: absolute; left: 10px; top: 8px; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; padding: 3px 10px; border-radius: 12px; z-index: 5; }
   #slideStat { font-size: 12px; color: #888; min-height: 18px; }
   /* 右列：视频在上，聊天在下 */
@@ -107,18 +108,22 @@
 
   function onSlide(m) {
     if (!m) return;
+    var wrap = document.getElementById('slideWrap');
     if (m.blank) {
       // 空白页：清空课件图，白底
       slideImg.removeAttribute('src');
-      slideImg.style.background = '#fff';
-      slideImg.style.minHeight = '400px';
+      wrap.style.background = '#fff';
       pageTag.style.display = '';
       pageTag.textContent = '空白页';
     } else {
       if (!m.imgUrl) return;
-      slideImg.style.background = '';
-      slideImg.style.minHeight = '';
-      slideImg.src = m.imgUrl;
+      wrap.style.background = '#000';
+      var url = m.imgUrl;
+      // 百家云图片去掉 OSS 缩放参数，拿原图更清晰
+      if (url.indexOf('img.baijiayun.com') !== -1 && url.indexOf('?') !== -1) {
+        url = url.split('?')[0];
+      }
+      slideImg.src = url;
       if (m.isFallback) {
         // 地址格式未知，不显示 hash 页码
         pageTag.style.display = 'none';
@@ -265,7 +270,8 @@
             lastHb = hb.ts || Date.now();
             var d = new Date(lastHb);
             var tstr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
-            slideStat.textContent = '课件已同步 · 广播端心跳 ' + tstr + '（第' + (hb.page || '?') + '页）';
+            var pageStr = (hb.page && hb.page > 0 && hb.page < 1000) ? '（第' + hb.page + '页）' : '';
+            slideStat.textContent = '课件已同步 · 广播端心跳 ' + tstr + pageStr;
             slideStat.style.color = '#4caf50';
           } catch (e) {}
         } else if (presBase && t.indexOf(presBase + '/') === 0) {
