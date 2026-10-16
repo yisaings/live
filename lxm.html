@@ -143,8 +143,9 @@
   var myId = 'u' + Math.random().toString(36).slice(2, 10);
   var client = null, nick = '我', joined = false;
   var chatTopic = null, presBase = null, myPresTopic = null;
-  var slideTopic = null, boardTopic = null, streamTopic = null;
+  var slideTopic = null, boardTopic = null, streamTopic = null, hbTopic = null;
   var roster = {}, hbTimer = null;
+  var lastHb = 0;
 
   var msgsEl = document.getElementById('msgs');
   var statusEl = document.getElementById('status');
@@ -197,6 +198,7 @@
     slideTopic = base + '/slide';
     boardTopic = base + '/board';
     streamTopic = base + '/stream';
+    hbTopic = base + '/hb';
     presBase = base + '/presence';
     myPresTopic = presBase + '/' + myId;
 
@@ -207,7 +209,7 @@
     });
 
     client.on('connect', function () {
-      client.subscribe([chatTopic, slideTopic, boardTopic, streamTopic, presBase + '/+'], function (err) {
+      client.subscribe([chatTopic, slideTopic, boardTopic, streamTopic, hbTopic, presBase + '/+'], function (err) {
         if (!err) {
           joined = true;
           setStatus('已进入房间：' + room, true);
@@ -236,6 +238,15 @@
           onBoard(JSON.parse(s));
         } else if (t === streamTopic) {
           onStream(JSON.parse(s));
+        } else if (t === hbTopic) {
+          try {
+            var hb = JSON.parse(s);
+            lastHb = hb.ts || Date.now();
+            var d = new Date(lastHb);
+            var tstr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+            slideStat.textContent = '课件已同步 · 广播端心跳 ' + tstr + '（第' + (hb.page || '?') + '页）';
+            slideStat.style.color = '#4caf50';
+          } catch (e) {}
         } else if (presBase && t.indexOf(presBase + '/') === 0) {
           handlePresence(t, payload);
         }
