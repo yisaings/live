@@ -6,32 +6,34 @@
 <title>乐学喵录播同步播放</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  html,body { height:100%; background:#111; color:#eee; font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; overflow:hidden; }
-  #app { display:grid; height:100vh;
-    grid-template-columns:1fr 320px; grid-template-rows:auto auto 1fr;
-    grid-template-areas:"slides video" "slides status" "slides chat"; }
-  /* 左：课件大画面 */
-  #left { grid-area:slides; display:flex; flex-direction:column; min-width:0; background:#000; min-height:0; }
+  html,body { height:100%; background:#111; color:#eee; font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  /* 默认竖排堆叠（mobile-first）：视频 → 状态 → 课件 → 聊天 */
+  html, body { overflow:auto; }
+  #app { display:flex; flex-direction:column; min-height:100vh; }
+  #vwrap { position:sticky; top:0; z-index:50; background:#000; }
+  #vwrap video { width:100%; display:block; max-height:30vh; background:#000; }
+  #status { padding:6px 10px; font-size:12px; color:#9fd; background:#1a1a1a; border-top:1px solid #333; border-bottom:1px solid #333; }
+  #left { display:flex; flex-direction:column; min-width:0; background:#000; }
   #head { padding:8px 12px; background:#1a1a1a; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #slideWrap { flex:1; position:relative; min-height:0; display:flex; align-items:center; justify-content:center; }
+  #slideWrap { position:relative; min-height:50vh; display:flex; align-items:center; justify-content:center; }
   #slide { max-width:100%; max-height:100%; object-fit:contain; display:block; }
   #board { position:absolute; pointer-events:none; }
-  /* 右列 */
-  #vwrap { grid-area:video; background:#000; }
-  #vwrap video { width:100%; display:block; max-height:32vh; background:#000; }
-  #status { grid-area:status; padding:6px 10px; font-size:12px; color:#9fd; background:#1a1a1a; border-top:1px solid #333; border-bottom:1px solid #333; }
-  #right { grid-area:chat; min-width:0; display:flex; flex-direction:column; border-left:1px solid #333; min-height:0; }
+  #right { min-width:0; display:flex; flex-direction:column; border-top:1px solid #333; }
   #chatTitle { padding:6px 10px; font-size:13px; background:#1a1a1a; color:#ccc; }
-  #chat { flex:1; overflow-y:auto; padding:8px 10px; font-size:13px; }
-  /* 移动端竖排：视频吸顶 → 状态 → 课件 → 聊天（DOM 顺序即正确顺序，直接 flex column） */
-  @media (max-width: 760px) {
-    html, body { overflow:auto; }
-    #app { display:flex; flex-direction:column; height:auto; min-height:100vh; }
-    #vwrap { position:sticky; top:0; z-index:50; }
-    #vwrap video { max-height:30vh; }
-    #slideWrap { min-height:50vh; }
-    #right { border-left:none; border-top:1px solid #333; }
-    #chat { overflow:visible; }
+  #chat { padding:8px 10px; font-size:13px; }
+  /* 宽屏：左课件大画面 + 右视频/状态/聊天 */
+  @media (min-width: 1025px) {
+    html, body { overflow:hidden; }
+    #app { display:grid; height:100vh; min-height:0;
+      grid-template-columns:1fr 320px; grid-template-rows:auto auto 1fr;
+      grid-template-areas:"slides video" "slides status" "slides chat"; }
+    #vwrap { grid-area:video; position:static; }
+    #vwrap video { max-height:32vh; }
+    #status { grid-area:status; }
+    #left { grid-area:slides; min-height:0; }
+    #slideWrap { flex:1; min-height:0; }
+    #right { grid-area:chat; border-top:none; border-left:1px solid #333; min-height:0; }
+    #chat { flex:1; overflow-y:auto; }
   }
   #chat .m { padding:4px 6px; margin-bottom:4px; border-radius:6px; background:#1e1e1e; cursor:pointer; opacity:.38; }
   #chat .m.past { opacity:1; background:#232a33; }
