@@ -90,18 +90,28 @@ if (!V_URL || !ALL_URL || !DOC_URL) {
 
 /* 白板画笔解码：points 是 base64，解出来每 3 字节一个点 (dx:int8, dy:int8, _)，单位 1/65536 白板宽度 */
 function decodeDoodle(shape) {
-  const bin = atob(shape.points);
-  const pts = [];
-  let x = parseFloat(shape.x), y = parseFloat(shape.y);
-  pts.push([x, y]);
-  for (let i = 0; i + 2 < bin.length; i += 3) {
-    let dx = bin.charCodeAt(i), dy = bin.charCodeAt(i + 1);
-    if (dx > 127) dx -= 256;
-    if (dy > 127) dy -= 256;
-    x += dx / 65536; y += dy / 65536;
-    pts.push([x, y]);
+  const raw = String(shape.points || '').trim();
+  // JSON 数组格式：[{"x":"0.29","y":"0.39"},...]（shape_update 里会出现）
+  if (raw.charAt(0) === '[') {
+    try {
+      return JSON.parse(raw).map(p => [parseFloat(p.x), parseFloat(p.y)]);
+    } catch (_) { return []; }
   }
-  return pts;
+  // base64 增量格式：每 3 字节一个点
+  try {
+    const bin = atob(raw);
+    const pts = [];
+    let x = parseFloat(shape.x), y = parseFloat(shape.y);
+    pts.push([x, y]);
+    for (let i = 0; i + 2 < bin.length; i += 3) {
+      let dx = bin.charCodeAt(i), dy = bin.charCodeAt(i + 1);
+      if (dx > 127) dx -= 256;
+      if (dy > 127) dy -= 256;
+      x += dx / 65536; y += dy / 65536;
+      pts.push([x, y]);
+    }
+    return pts;
+  } catch (_) { return []; }
 }
 
 async function main() {
