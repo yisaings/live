@@ -49,7 +49,17 @@
   #text { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #444; background: #222; color: #eee; font-size: 14px; min-width: 0; }
   #sendBtn { padding: 8px 16px; border-radius: 6px; border: none; background: #1e88e5; color: #fff; font-size: 14px; cursor: pointer; white-space: nowrap; }
   #tip { font-size: 11px; color: #666; margin-top: 8px; line-height: 1.6; }
-  @media (max-width: 760px) { #main { flex-direction: column; } #right { max-height: 60vh; } }
+  /* 移动端竖排：视频吸顶 → 课件 → 聊天 */
+  @media (max-width: 760px) {
+    #main { flex-direction: column; padding: 8px; gap: 8px; }
+    #main.m #videoWrap { position: sticky; top: 0; z-index: 50; margin-bottom: 0; border-radius: 0; }
+    #main.m #videoWrap video { max-height: 30vh; }
+    #left { order: 2; }
+    #left > div { height: auto; }
+    #slideWrap { min-height: 52vh; }
+    #right { order: 3; max-height: none; min-width: 0; }
+    #msgs { max-height: 46vh; }
+  }
 </style>
 </head>
 <body>
@@ -208,29 +218,31 @@
     if (m.img) boardImg.src = m.img;  // 旧版 PNG 兼容
   }
 
-  // ---------- 视频（flv） ----------
+  // ---------- 视频（FLV） ----------
   var flvPlayer = null;
   var vstat = document.getElementById('vstat');
   function setVStat(t) { vstat.textContent = t || ''; }
-  function playFlv(url) {
+  function playStream(m) {
     var video = document.getElementById('v');
     if (flvPlayer) {
       try { flvPlayer.unload(); flvPlayer.detachMediaElement(); flvPlayer.destroy(); } catch (e) {}
       flvPlayer = null;
     }
-    if (!window.flvjs || !flvjs.isSupported()) {
-      setVStat('当前浏览器不支持 FLV，请换 Chrome / Edge');
+    var canFlv = window.flvjs && flvjs.isSupported();
+    if (!canFlv) {
+      setVStat('当前浏览器不支持 FLV，请换 Chrome / Edge（iOS 可装 VLC 直接播视频流）');
       return;
     }
     setVStat('');
-    flvPlayer = flvjs.createPlayer({ type: 'flv', isLive: true, url: url });
+    video.removeAttribute('src');
+    flvPlayer = flvjs.createPlayer({ type: 'flv', isLive: true, url: m.url });
     flvPlayer.attachMediaElement(video);
     flvPlayer.load();
     flvPlayer.play().catch(function () {});
   }
   function onStream(m) {
     if (!m || !m.url) return;
-    playFlv(m.url);
+    playStream(m);
   }
 
   // ---------- MQTT ----------
@@ -408,6 +420,28 @@
   document.getElementById('text').addEventListener('keydown', function (e) {
     if (e.key === 'Enter') send();
   });
+
+  // ---------- 移动端竖排：视频吸顶 → 课件 → 聊天 ----------
+  (function () {
+    var main = document.getElementById('main');
+    var right = document.getElementById('right');
+    var vw = document.getElementById('videoWrap');
+    var vs = document.getElementById('vstat');
+    function apply() {
+      var mobile = window.innerWidth <= 760;
+      if (mobile && !main.classList.contains('m')) {
+        main.classList.add('m');
+        main.insertBefore(vw, main.firstChild);
+        main.insertBefore(vs, vw.nextSibling);
+      } else if (!mobile && main.classList.contains('m')) {
+        main.classList.remove('m');
+        right.insertBefore(vw, right.firstChild);
+        right.insertBefore(vs, vw.nextSibling);
+      }
+    }
+    window.addEventListener('resize', apply);
+    apply();
+  })();
 })();
 </script>
 </body>

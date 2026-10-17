@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>乐学喵录播同步播放</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; background:#111; color:#eee; font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; overflow:hidden; }
+  #app { display:flex; height:100vh; }
+  /* 左：课件大画面 */
+  #left { flex:4; display:flex; flex-direction:column; min-width:0; background:#000; }
+  #head { padding:8px 12px; background:#1a1a1a; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #slideWrap { flex:1; position:relative; min-height:0; display:flex; align-items:center; justify-content:center; }
+  #slide { max-width:100%; max-height:100%; object-fit:contain; display:block; }
+  #board { position:absolute; pointer-events:none; }
+  /* 右列 */
+  #right { flex:1; min-width:260px; max-width:340px; display:flex; flex-direction:column; border-left:1px solid #333; }
+  #vwrap { background:#000; }
+  #vwrap video { width:100%; display:block; max-height:32vh; background:#000; }
+  #status { padding:6px 10px; font-size:12px; color:#9fd; background:#1a1a1a; border-top:1px solid #333; border-bottom:1px solid #333; }
+  #chatTitle { padding:6px 10px; font-size:13px; background:#1a1a1a; color:#ccc; }
+  #chat { flex:1; overflow-y:auto; padding:8px 10px; font-size:13px; }
+  /* 移动端竖排：视频吸顶 → 课件 → 聊天 */
+  @media (max-width: 760px) {
+    html, body { overflow:auto; }
+    #app { flex-direction:column; height:auto; min-height:100vh; }
+    #app.m #vwrap { position:sticky; top:0; z-index:50; }
+    #app.m #vwrap video { max-height:30vh; }
+    #left { order:2; }
+    #slideWrap { min-height:52vh; }
+    #right { order:3; max-width:none; border-left:none; border-top:1px solid #333; }
+    #chat { overflow:visible; }
+  }
+  #chat .m { padding:4px 6px; margin-bottom:4px; border-radius:6px; background:#1e1e1e; cursor:pointer; opacity:.38; }
+  #chat .m.past { opacity:1; background:#232a33; }
+  #chat .m .u { color:#7db8ff; font-size:12px; }
+  #chat .m .t { color:#888; font-size:11px; margin-left:6px; }
+  #setup { padding:20px; font-size:14px; line-height:1.8; }
+  #setup code { background:#222; padding:2px 6px; border-radius:4px; font-size:12px; word-break:break-all; }
+</style>
+</head>
+<body>
+<div id="app" style="display:none">
+  <div id="left">
+    <div id="head">加载中…</div>
+    <div id="slideWrap"><img id="slide" alt="课件"><canvas id="board"></canvas></div>
+  </div>
+  <div id="right">
+    <div id="vwrap"><video id="v" controls playsinline preload="metadata"></video></div>
+    <div id="status">--</div>
+    <div id="chatTitle">聊天（点击可跳转）</div>
+    <div id="chat"></div>
+  </div>
+</div>
+<div id="setup" style="display:none"></div>
+<script>
+'use strict';
+/* ============ 参数 ============
+   v    : 录播 mp4 地址（录播页 F12 抓到的签名直链，约6小时有效；长期看请下载后自托管）
+   all  : all.json 地址（getPlayInfo 响应 signal.all.url，永久有效）
+   doc  : doc.json 地址（getPlayInfo 响应 signal.doc.url，永久有效）
+   off  : 时间校准毫秒数（默认0；若翻页和视频对不上，用 ?off=2000 / ?off=-2000 微调）
+   title: 标题（可选）
+*/
+const q = new URLSearchParams(location.search);
+let V_URL = q.get('v') || '';
+/* mp4 签名直链里自带 ?t=..&sign=..，直接拼在地址栏会被当成外层参数，这里拼回去 */
+for (const k of ['t', 'sign', 'uuid']) {
+  const val = q.get(k);
+  if (val && !new RegExp('[?&]' + k + '=').test(V_URL)) {
+    V_URL += (V_URL.indexOf('?') === -1 ? '?' : '&') + k + '=' + encodeURIComponent(val);
+  }
+}
+const ALL_URL = q.get('all'), DOC_URL = q.get('doc');
+const OFF = parseInt(q.get('off') || '0', 10) || 0;
+
+if (!V_URL || !ALL_URL || !DOC_URL) {
+  const s = document.getElementById('setup');
+  s.style.display = 'block';
+  s.innerHTML = '用法：<br><code>' + location.pathname.split('/').pop() +
+    '?v=mp4地址&all=all.json地址&doc=doc.json地址</code><br><br>' +
+    '三个地址来源：打开录播页按 F12 —— <br>1. <b>v</b>：网络面板搜 mp4，复制那条 400MB+ 的直链（签名约6小时过期）；<br>' +
+    '2. <b>all / doc</b>：网络面板搜 getPlayInfo，响应里 signal.all.url 和 signal.doc.url（永久有效）。<br><br>' +
+    '可选：<code>&off=毫秒数</code> 微调音画同步，<code>&title=标题</code>。';
+} else {
+  document.getElementById('app').style.display = 'flex';
+  main().catch(e => { document.getElementById('status').textContent = '出错：' + e.message; });
+}
+
+/* 白板画笔解码：points 是 base64，解出来每 3 字节一个点 (dx:int8, dy:int8, _)，单位 1/65536 白板宽度 */
+function decodeDoodle(shape) {
+  const bin = atob(shape.points);
+  const pts = [];
+  let x = parseFloat(shape.x), y = parseFloat(shape.y);
+  pts.push([x, y]);
+  for (let i = 0; i + 2 < bin.length; i += 3) {
+    let dx = bin.charCodeAt(i), dy = bin.charCodeAt(i + 1);
+    if (dx > 127) dx -= 256;
+    if (dy > 127) dy -= 256;
+    x += dx / 65536; y += dy / 65536;
+    pts.push([x, y]);
+  }
+  return pts;
+}
+
+async function main() {
+  const head = document.getElementById('head'), status = document.getElementById('status');
+  const video = document.getElementById('v'), slide = document.getElementById('slide');
+  const board = document.getElementById('board'), chatEl = document.getElementById('chat');
+  head.textContent = q.get('title') || '乐学喵录播';
+  video.src = V_URL;
+
+  status.textContent = '拉取时间轴…';
+  const [all, doc] = await Promise.all([
+    fetch(ALL_URL).then(r => { if (!r.ok) throw new Error('all.json 拉取失败'); return r.json(); }),
+    fetch(DOC_URL).then(r => { if (!r.ok) throw new Error('doc.json 拉取失败'); return r.json(); })
+  ]);
+
+  // 课件图地址前缀
+  const docItem = doc.find(d => d.page_info && d.page_info.url_prefix) || {};
+  const prefix = (docItem.page_info || {}).url_prefix || '';
+  const totalPages = parseInt((docItem.page_info || {}).total_pages || '0', 10);
+  const boardItem = doc.find(d => d.name === 'board');
+  const boardBg = boardItem && boardItem.page_list && boardItem.page_list[0] ? boardItem.page_list[0].url : '';
+
+  // 事件按时间排序
+  const evs = all.filter(e => e.offset_timestamp_ms != null)
+                 .sort((a, b) => a.offset_timestamp_ms - b.offset_timestamp_ms);
+  const pageEvs = evs.filter(e => e.message_type === 'page_change');
+  const shapeAdds = [], shapeDels = [], chats = [];
+  for (const e of evs) {
+    if (e.message_type === 'shape_add' && e.shape) {
+      const s = e.shape;
+      const rec = { t: e.offset_timestamp_ms, doc: String(e.doc_id), page: e.page,
+                    id: String(s.id), num: s.number, name: s.name,
+                    color: s.strokeStyle || '#f00', lw: parseFloat(s.lineWidth) || 2 };
+      if (s.name === 'Doodle' && s.points) { rec.pts = decodeDoodle(s); }
+      else if (s.text != null) { rec.text = String(s.text); rec.fx = parseFloat(s.x); rec.fy = parseFloat(s.y); rec.fs = parseFloat(s.fontSize) || 0.03; }
+      else continue;
+      shapeAdds.push(rec);
+    } else if (e.message_type === 'shape_del') {
+      shapeDels.push({ t: e.offset_timestamp_ms, doc: String(e.doc_id), page: e.page, id: String(e.shape_id) });
+    } else if (e.message_type === 'message_send' && e.content) {
+      let uname = '学员';
+      try { uname = (e.from && (e.from.user_name || e.from.name)) || uname; } catch (_) {}
+      chats.push({ t: e.offset_timestamp_ms, u: uname, c: String(e.content) });
+    }
+  }
+  // 聊天渲染
+  const chatNodes = chats.map(m => {
+    const d = document.createElement('div');
+    d.className = 'm';
+    const mm = String(Math.floor(Math.max(0, m.t) / 60000)).padStart(2, '0');
+    const ss = String(Math.floor(Math.max(0, m.t) / 1000) % 60).padStart(2, '0');
+    d.innerHTML = '<span class="u"></span><span class="t">' + mm + ':' + ss + '</span><div class="c"></div>';
+    d.querySelector('.u').textContent = m.u;
+    d.querySelector('.c').textContent = m.c;
+    d.title = '点击跳到 ' + mm + ':' + ss;
+    d.onclick = () => { video.currentTime = Math.max(0, m.t / 1000); };
+    chatEl.appendChild(d);
+    return d;
+  });
+
+  const wrap = document.getElementById('slideWrap');
+  function fitBoard() {
+    const r = slide.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+    board.width = Math.max(1, Math.round(r.width));
+    board.height = Math.max(1, Math.round(r.height));
+    board.style.left = (r.left - w.left) + 'px';
+    board.style.top = (r.top - w.top) + 'px';
+  }
+  new ResizeObserver(() => { fitBoard(); sync(true); }).observe(wrap);
+  slide.onload = () => { fitBoard(); sync(true); };
+
+  let curKey = '';
+  function sync(force) {
+    const t = video.currentTime * 1000 + OFF;
+    // 当前 (doc,page)
+    let docId = '143970621', page = 0;
+    for (const e of pageEvs) {
+      if (e.offset_timestamp_ms <= t) { docId = String(e.doc_id); page = e.page; }
+      else break;
+    }
+    const key = docId + ':' + page;
+    if (key !== curKey || force) {
+      curKey = key;
+      slide.src = (docId === '0' ? boardBg : (prefix + '_' + (page + 1) + '.png'));
+      head.textContent = (q.get('title') || '乐学喵录播') +
+        (docId === '0' ? ' · 白板' : ' · 第' + (page + 1) + '页' + (totalPages ? '/' + totalPages : ''));
+    }
+    // 白板：当前页未被删除的笔迹
+    const delIds = new Set();
+    for (const d of shapeDels) if (d.t <= t && d.doc === docId && d.page === page) delIds.add(d.id);
+    const ctx = board.getContext('2d');
+    ctx.clearRect(0, 0, board.width, board.height);
+    let n = 0;
+    for (const s of shapeAdds) {
+      if (s.t > t || s.doc !== docId || s.page !== page || delIds.has(s.id)) continue;
+      n++;
+      ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
+      ctx.lineWidth = Math.max(1, s.lw * board.width / 1000);
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      if (s.pts) {
+        ctx.beginPath();
+        s.pts.forEach((p, i) => {
+          const X = p[0] * board.width, Y = p[1] * board.height;
+          i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+        });
+        ctx.stroke();
+      } else if (s.text) {
+        ctx.font = Math.round(s.fs * board.height) + 'px sans-serif';
+        ctx.fillText(s.text, s.fx * board.width, s.fy * board.height);
+      }
+    }
+    // 聊天跟随
+    let lastPast = -1;
+    chats.forEach((m, i) => {
+      const past = m.t <= t;
+      chatNodes[i].classList.toggle('past', past);
+      if (past) lastPast = i;
+    });
+    if (lastPast >= 0 && !video.paused && !userScrolled) {
+      chatNodes[lastPast].scrollIntoView({ block: 'nearest' });
+    }
+    const mm = String(Math.floor(Math.max(0, t) / 60000)).padStart(2, '0');
+    const ss = String(Math.floor(Math.max(0, t) / 1000) % 60).padStart(2, '0');
+    status.textContent = mm + ':' + ss + ' · 笔迹' + n + ' · 聊天' + chats.length +
+      (OFF ? ' · 校准' + (OFF > 0 ? '+' : '') + OFF + 'ms' : '');
+  }
+
+  let userScrolled = false, scrollTimer = null;
+  chatEl.addEventListener('scroll', () => {
+    userScrolled = true;
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => { userScrolled = false; }, 8000);
+  });
+  let tick = 0;
+  video.addEventListener('timeupdate', () => {
+    // timeupdate 约4Hz，够用了；拖动进度条时 seeked 会强制全量同步
+    if (++tick % 2 === 0) sync(false);
+  });
+  video.addEventListener('seeked', () => sync(true));
+  video.addEventListener('loadedmetadata', () => sync(true));
+  fitBoard(); sync(true);
+  status.textContent = '就绪 · ' + pageEvs.length + '次翻页 · ' + shapeAdds.length + '笔迹 · ' + chats.length + '条聊天';
+}
+
+/* 移动端竖排：视频吸顶 → 课件 → 聊天 */
+(function () {
+  var app = document.getElementById('app');
+  var right = document.getElementById('right');
+  var vw = document.getElementById('vwrap');
+  var st = document.getElementById('status');
+  function apply() {
+    var mobile = window.innerWidth <= 760;
+    if (mobile && !app.classList.contains('m')) {
+      app.classList.add('m');
+      app.insertBefore(vw, app.firstChild);
+      app.insertBefore(st, vw.nextSibling);
+    } else if (!mobile && app.classList.contains('m')) {
+      app.classList.remove('m');
+      right.insertBefore(vw, right.firstChild);
+      right.insertBefore(st, vw.nextSibling);
+    }
+  }
+  window.addEventListener('resize', apply);
+  apply();
+})();
+</script>
+</body>
+</html>
