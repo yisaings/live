@@ -128,7 +128,7 @@ async function main() {
   const evs = all.filter(e => e.offset_timestamp_ms != null)
                  .sort((a, b) => a.offset_timestamp_ms - b.offset_timestamp_ms);
   const pageEvs = evs.filter(e => e.message_type === 'page_change');
-  const shapeAdds = [], shapeDels = [], chats = [];
+  const shapeAdds = [], shapeDels = [], shapeUpdates = [], chats = [];
   for (const e of evs) {
     if (e.message_type === 'shape_add' && e.shape) {
       const s = e.shape;
@@ -139,6 +139,18 @@ async function main() {
       else if (s.text != null) { rec.text = String(s.text); rec.fx = parseFloat(s.x); rec.fy = parseFloat(s.y); rec.fs = parseFloat(s.fontSize) || 0.03; }
       else continue;
       shapeAdds.push(rec);
+    } else if (e.message_type === 'shape_update' && e.shape_list) {
+      // shape_update = 全量替换该形状的可视数据（如老师把"烤鱼"改成"完全零基础"）
+      const sl = Array.isArray(e.shape_list) ? e.shape_list : [e.shape_list];
+      for (const s of sl) {
+        const patch = {};
+        if (s.name === 'Doodle' && s.points) { patch.pts = decodeDoodle(s); }
+        else if (s.text != null) { patch.text = String(s.text); patch.fx = parseFloat(s.x); patch.fy = parseFloat(s.y); patch.fs = parseFloat(s.fontSize) || 0.03; }
+        else continue;
+        if (s.strokeStyle) patch.color = s.strokeStyle;
+        if (parseFloat(s.lineWidth)) patch.lw = parseFloat(s.lineWidth);
+        shapeUpdates.push({ t: e.offset_timestamp_ms, id: String(s.id), patch });
+      }
     } else if (e.message_type === 'shape_del') {
       shapeDels.push({ t: e.offset_timestamp_ms, doc: String(e.doc_id), page: e.page, id: String(e.shape_id) });
     } else if (e.message_type === 'message_send' && e.content) {
@@ -197,20 +209,28 @@ async function main() {
     let n = 0;
     for (const s of shapeAdds) {
       if (s.t > t || s.doc !== docId || s.page !== page || delIds.has(s.id)) continue;
+      // 取 t 时刻前该形状的最后一次 shape_update（全量替换）
+      let r = s;
+      for (const u of shapeUpdates) {
+        if (u.id === s.id && u.t <= t && u.t >= s.t) {
+          r = Object.assign({}, s, u.patch);
+        }
+      }
+      const s2 = r;
       n++;
-      ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
-      ctx.lineWidth = Math.max(1, s.lw * board.width / 1000);
+      ctx.strokeStyle = s2.color; ctx.fillStyle = s2.color;
+      ctx.lineWidth = Math.max(1, s2.lw * board.width / 1000);
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      if (s.pts) {
+      if (s2.pts) {
         ctx.beginPath();
-        s.pts.forEach((p, i) => {
+        s2.pts.forEach((p, i) => {
           const X = p[0] * board.width, Y = p[1] * board.height;
           i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
         });
         ctx.stroke();
-      } else if (s.text) {
-        ctx.font = Math.round(s.fs * board.height) + 'px sans-serif';
-        ctx.fillText(s.text, s.fx * board.width, s.fy * board.height);
+      } else if (s2.text) {
+        ctx.font = Math.round(s2.fs * board.height) + 'px sans-serif';
+        ctx.fillText(s2.text, s2.fx * board.width, s2.fy * board.height);
       }
     }
     // 聊天跟随
