@@ -18,7 +18,7 @@
   #slideWrap { position:relative; min-height:50vh; display:flex; align-items:center; justify-content:center; }
   #slide { max-width:100%; max-height:100%; object-fit:contain; display:block; }
   #board { position:absolute; pointer-events:none; }
-  #right { min-width:0; display:flex; flex-direction:column; border-top:1px solid #333; }
+  #right { display:none; }
   #chatTitle { padding:6px 10px; font-size:13px; background:#1a1a1a; color:#ccc; }
   #chat { padding:8px 10px; font-size:13px; }
   /* 宽屏：左课件大画面 + 右视频/状态/聊天 */
@@ -32,7 +32,7 @@
     #status { grid-area:status; }
     #left { grid-area:slides; min-height:0; }
     #slideWrap { flex:1; min-height:0; }
-    #right { grid-area:chat; border-top:none; border-left:1px solid #333; min-height:0; }
+    #right { grid-area:chat; display:flex; flex-direction:column; min-width:0; border-top:none; border-left:1px solid #333; min-height:0; }
     #chat { flex:1; overflow-y:auto; }
   }
   #chat .m { padding:4px 6px; margin-bottom:4px; border-radius:6px; background:#1e1e1e; cursor:pointer; opacity:.38; }
