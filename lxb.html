@@ -21,16 +21,18 @@
   #status { padding:6px 10px; font-size:12px; color:#9fd; background:#1a1a1a; border-top:1px solid #333; border-bottom:1px solid #333; }
   #chatTitle { padding:6px 10px; font-size:13px; background:#1a1a1a; color:#ccc; }
   #chat { flex:1; overflow-y:auto; padding:8px 10px; font-size:13px; }
-  /* 移动端竖排：视频吸顶 → 课件 → 聊天 */
+  /* 移动端竖排：视频吸顶 → 课件 → 聊天（纯 CSS，无 JS 重排） */
   @media (max-width: 760px) {
     html, body { overflow:auto; }
     #app { flex-direction:column; height:auto; min-height:100vh; }
-    #app.m #vwrap { position:sticky; top:0; z-index:50; }
-    #app.m #vwrap video { max-height:30vh; }
-    #left { order:2; }
-    #slideWrap { min-height:52vh; }
-    #right { order:3; max-width:none; border-left:none; border-top:1px solid #333; }
-    #chat { overflow:visible; }
+    #right { display:contents; }
+    #vwrap { order:1; position:sticky; top:0; z-index:50; background:#000; }
+    #vwrap video { max-height:30vh; }
+    #status { order:2; }
+    #left { order:3; }
+    #slideWrap { min-height:50vh; }
+    #chatTitle { order:4; margin-top:8px; }
+    #chat { order:5; overflow:visible; }
   }
   #chat .m { padding:4px 6px; margin-bottom:4px; border-radius:6px; background:#1e1e1e; cursor:pointer; opacity:.38; }
   #chat .m.past { opacity:1; background:#232a33; }
@@ -277,26 +279,6 @@ async function main() {
 }
 
 /* 移动端竖排：视频吸顶 → 课件 → 聊天 */
-(function () {
-  var app = document.getElementById('app');
-  var right = document.getElementById('right');
-  var vw = document.getElementById('vwrap');
-  var st = document.getElementById('status');
-  function apply() {
-    var mobile = window.innerWidth <= 760;
-    if (mobile && !app.classList.contains('m')) {
-      app.classList.add('m');
-      app.insertBefore(vw, app.firstChild);
-      app.insertBefore(st, vw.nextSibling);
-    } else if (!mobile && app.classList.contains('m')) {
-      app.classList.remove('m');
-      right.insertBefore(vw, right.firstChild);
-      right.insertBefore(st, vw.nextSibling);
-    }
-  }
-  window.addEventListener('resize', apply);
-  apply();
-})();
 </script>
 </body>
 </html>
